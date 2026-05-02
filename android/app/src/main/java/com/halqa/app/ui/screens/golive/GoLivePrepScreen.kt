@@ -395,10 +395,10 @@ private fun ToggleRow(label: String, icon: ImageVector) {
         Icon(icon, contentDescription = null, tint = HalqaColors.TextMuted)
         Spacer(Modifier.size(12.dp))
         Text(label, color = HalqaColors.Text, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        // Force LTR layout direction for the toggle's knob alignment. The whole
-        // app forces RTL globally (MainActivity), which would otherwise flip
-        // CenterStart/CenterEnd and place the knob on the wrong physical side
-        // (Material spec: switches do not mirror in RTL).
+        // Force LTR for the toggle knob alignment. The whole app forces RTL
+        // globally (MainActivity), which would otherwise flip CenterStart /
+        // CenterEnd and place the knob on the wrong physical side. Material
+        // spec explicitly says switches do not mirror in RTL.
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(
                 modifier = Modifier

@@ -51,7 +51,13 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun UnderReviewScreen(navController: NavController) {
-    val review = SystemMessages.demoOpenReview
+    // `SystemMessages.demoOpenReview` is now a `get`-property that captures
+    // `System.currentTimeMillis()` at every read, so we MUST cache it through
+    // `remember` here. Otherwise the per-second `now` state update below would
+    // re-run this composable, fetch a brand-new review whose
+    // `autoCloseAtEpochMs` is again 10 minutes in the future, and freeze the
+    // countdown at ~10:00 forever.
+    val review = remember { SystemMessages.demoOpenReview }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
