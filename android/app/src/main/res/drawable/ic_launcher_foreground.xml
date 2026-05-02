@@ -1,0 +1,29 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M54,54m-9,0a9,9 0,1 1,18 0a9,9 0,1 1,-18 0" />
+
+    <!-- Six dots forming a circle (halqa) -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M54,28m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#9333EA"
+        android:pathData="M76.5,41m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#C026D3"
+        android:pathData="M76.5,67m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#EC4899"
+        android:pathData="M54,80m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#A855F7"
+        android:pathData="M31.5,67m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M31.5,41m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0" />
+</vector>
