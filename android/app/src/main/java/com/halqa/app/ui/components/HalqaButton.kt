@@ -112,7 +112,7 @@ fun GhostButton(
             containerColor = Color.White.copy(alpha = 0.05f),
         ),
         shape = RoundedCornerShape(16.dp),
-        border = ButtonDefaults.outlinedButtonBorder(enabled).copy(width = 1.dp),
+        border = null,
         modifier = modifier
             .let { if (fillMaxWidth) it.fillMaxWidth() else it }
             .heightIn(min = 56.dp)

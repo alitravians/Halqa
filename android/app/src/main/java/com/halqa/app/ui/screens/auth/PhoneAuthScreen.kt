@@ -95,7 +95,10 @@ fun PhoneAuthScreen(navController: NavController) {
 
                 HalqaTextField(
                     value = phone,
-                    onValueChange = { if (it.length <= 10) phone = it.filter { c -> c.isDigit() } },
+                    onValueChange = {
+                        val digits = it.filter { c -> c.isDigit() }
+                        if (digits.length <= 10) phone = digits
+                    },
                     modifier = Modifier.weight(1f),
                     placeholder = "5✕ ✕✕✕ ✕✕✕✕",
                     keyboardType = KeyboardType.Phone,
