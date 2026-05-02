@@ -240,8 +240,8 @@ fun StreamCard(stream: StreamPreview, onClick: () -> Unit) {
 
 private fun formatViewers(n: Int): String =
     when {
-        n >= 1_000_000 -> "%.1f".format(n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
-        n >= 1_000 -> "%.1f".format(n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
+        n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
+        n >= 1_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
         else -> "$n"
     }
 
