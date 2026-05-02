@@ -6,9 +6,12 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatNumber(n: number, locale: string = "ar"): string {
+  // Use ASCII (Western) digits everywhere so "1.5ك" and "500" share the same
+  // digit script. ar-SA via Intl.NumberFormat would otherwise emit
+  // Arabic-Indic digits (٠-٩) only below 1,000, producing inconsistent runs.
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + (locale === "ar" ? "م" : "M");
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + (locale === "ar" ? "ك" : "K");
-  return new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US").format(n);
+  return n.toString();
 }
 
 export function formatCoins(n: number, locale: string = "ar"): string {
