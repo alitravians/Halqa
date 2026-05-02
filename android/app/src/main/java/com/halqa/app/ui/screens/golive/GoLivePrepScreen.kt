@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
+import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.SafetyPrefs
 import com.halqa.app.livekit.BroadcastSession
 import com.halqa.app.livekit.LiveBroadcastService
@@ -74,13 +76,40 @@ private val categories = listOf("ترفيه", "موسيقى", "ألعاب", "د�
 
 @Composable
 fun GoLivePrepScreen(navController: NavController) {
+    val context = LocalContext.current
+
+    // Defence-in-depth #1 (UI gate): refuse to render the broadcast prep
+    // surface at all if there's no Firebase session. Previously this case
+    // fell through to launchBroadcast() which showed the camera/mic
+    // permission rationale dialog — extremely misleading because the user
+    // had granted both permissions and the real cause was "not signed in".
+    //
+    // We observe `authStateFlow()` so that if the user signs out from
+    // Settings (or session is revoked, or token expires after long idle,
+    // or password reset on another device), this screen reactively flips
+    // to the sign-in notice instead of a stale snapshot. The current
+    // FirebaseAuth user is used as `initialValue` to avoid a cold-start
+    // flash of the notice on first composition.
+    val firebaseUser by FirebaseAuthRepository.authStateFlow()
+        .collectAsStateWithLifecycle(initialValue = FirebaseAuth.getInstance().currentUser)
+    val firebaseUid = firebaseUser?.uid
+    if (firebaseUid.isNullOrBlank()) {
+        SignInRequiredNotice(
+            onSignIn = {
+                navController.navigate(Routes.Auth) {
+                    popUpTo(Routes.Main) { inclusive = false }
+                }
+            },
+        )
+        return
+    }
+
     var title by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(categories.first()) }
     var showWarningDialog by remember { mutableStateOf(false) }
     var showPermissionRationale by remember { mutableStateOf(false) }
+    var showSignInRequired by remember { mutableStateOf(false) }
     var showReadyToStream by remember { mutableStateOf(false) }
-
-    val context = LocalContext.current
 
     // Re-read the in-memory acceptance flag whenever this screen returns to the
     // foreground (e.g. after the user navigated to AgeGateScreen and came back).
@@ -110,9 +139,14 @@ fun GoLivePrepScreen(navController: NavController) {
     }
 
     fun launchBroadcast() {
+        // Defence-in-depth #2: even if the UI gate let us reach this point
+        // without auth, refuse to start a broadcast without a Firebase uid.
+        // BroadcastSession + the backend `/api/livekit/token` endpoint also
+        // re-check, so a missing uid here is a soft failure with a real
+        // Arabic-language explanation, NOT the misleading permission dialog.
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid.isNullOrBlank()) {
-            showPermissionRationale = true
+            showSignInRequired = true
             return
         }
         val streamId = "u_${uid}_${System.currentTimeMillis()}"
@@ -342,6 +376,34 @@ fun GoLivePrepScreen(navController: NavController) {
         )
     }
 
+    if (showSignInRequired) {
+        AlertDialog(
+            onDismissRequest = { showSignInRequired = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSignInRequired = false
+                    navController.navigate(Routes.Auth) {
+                        // Don't pop back to a half-prepared go-live state.
+                        popUpTo(Routes.Main) { inclusive = false }
+                    }
+                }) { Text("تسجيل الدخول", color = HalqaColors.BrandLight) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignInRequired = false }) {
+                    Text("لاحقاً", color = HalqaColors.TextMuted)
+                }
+            },
+            title = { Text("يلزم تسجيل الدخول", color = HalqaColors.Text) },
+            text = {
+                Text(
+                    "لبدء بث مباشر، يجب تسجيل الدخول أولاً. هذا لربط البث بحسابك وتفعيل الإشعارات وحفظ السجل.",
+                    color = HalqaColors.TextMuted,
+                )
+            },
+            containerColor = HalqaColors.BgElevated,
+        )
+    }
+
     if (showReadyToStream) {
         AlertDialog(
             onDismissRequest = { showReadyToStream = false },
@@ -501,6 +563,57 @@ private fun AgeGateInlineNotice(onOpenAgeGate: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Text(
             "يمكنك التنقّل لتبويب آخر في أي وقت من الشريط السفلي.",
+            color = HalqaColors.TextMuted,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+/**
+ * Inline notice rendered in place of the broadcast prep UI when the user
+ * has no Firebase session. Replaces the previous misleading "permission
+ * rationale" dialog that was shown for both genuine permission denial AND
+ * missing-auth — the user couldn't tell why broadcasting wouldn't start.
+ */
+@Composable
+private fun SignInRequiredNotice(onSignIn: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(HalqaColors.Bg)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(HalqaColors.BrandDark.copy(alpha = 0.18f))
+                .border(1.dp, HalqaColors.BrandLight.copy(alpha = 0.5f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = HalqaColors.BrandLight, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "يلزم تسجيل الدخول لبدء البث",
+            color = HalqaColors.Text,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "لبدء بث مباشر، نحتاج ربط البث بحسابك حتى تظهر هويتك للمشاهدين، ويُحفظ السجل، وتعمل الإشعارات والإجراءات الإدارية.",
+            color = HalqaColors.TextMuted,
+            fontSize = 14.sp,
+            lineHeight = 22.sp,
+        )
+        Spacer(Modifier.height(24.dp))
+        PrimaryButton(text = "تسجيل الدخول", onClick = onSignIn)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "لا يلزمك دفع أو تحقّق هوية لتجربة البث في الإصدار التجريبي.",
             color = HalqaColors.TextMuted,
             fontSize = 12.sp,
         )
