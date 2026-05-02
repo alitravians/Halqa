@@ -84,7 +84,11 @@ class LiveBroadcastService : Service() {
     }
 
     private fun startForegroundWithNotification(n: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // FOREGROUND_SERVICE_TYPE_CAMERA / FOREGROUND_SERVICE_TYPE_MICROPHONE were
+        // introduced in API 30 (R). Calling startForeground(int, Notification, int)
+        // exists from API 29 (Q) but with these specific constants only valid on
+        // R+; gate strictly on R to avoid undefined behavior on Android 10 devices.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(
                 NOTIFICATION_ID,
                 n,

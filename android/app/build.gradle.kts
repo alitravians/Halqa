@@ -54,6 +54,20 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    lint {
+        // Arabic-only strings (the app is RTL-first; English is partial). The
+        // ExtraTranslation noise comes from `values-ar/strings.xml` and
+        // `values-en/strings.xml` having keys not present in default
+        // `values/strings.xml` — that's intentional, not a regression.
+        disable += setOf(
+            "ExtraTranslation",
+            "MissingTranslation",
+        )
+        // Only fail builds on real correctness issues, not warnings.
+        abortOnError = true
+        warningsAsErrors = false
+    }
 }
 
 dependencies {

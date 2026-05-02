@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31) splash screen attributes. Only applied on supported
+         devices; older devices fall back to values/themes.xml. -->
+    <style name="Theme.Halqa.Splash" parent="Theme.Halqa">
+        <item name="android:windowSplashScreenBackground">@color/halqa_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>

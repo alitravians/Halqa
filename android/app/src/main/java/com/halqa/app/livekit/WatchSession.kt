@@ -38,12 +38,13 @@ object WatchSession {
 
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
+    private var connectJob: Job? = null
 
     fun start(appContext: Context, streamId: String, ownerUid: String?) {
         cleanup()
         _state.value = WatchState.Connecting(streamId)
 
-        scope.launch {
+        connectJob = scope.launch {
             try {
                 val tokenResp = withContext(Dispatchers.IO) {
                     ApiClient.api.livekitToken(
@@ -75,6 +76,8 @@ object WatchSession {
                     ownerUid = ownerUid,
                     viewerCount = newRoom.remoteParticipants.size,
                 )
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // Superseded by another start() — leave state to the caller.
             } catch (t: Throwable) {
                 cleanup()
                 _state.value = WatchState.Failed(streamId, t.message ?: "تعذّر الانضمام للبث")
@@ -119,6 +122,8 @@ object WatchSession {
     }
 
     private fun cleanup() {
+        connectJob?.cancel()
+        connectJob = null
         eventsJob?.cancel()
         eventsJob = null
         room?.disconnect()
