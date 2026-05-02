@@ -2,7 +2,6 @@ package com.halqa.app.ui.screens.wallet
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +22,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,15 +32,34 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import com.halqa.app.data.MockData
 import com.halqa.app.data.CoinPackage
+import com.halqa.app.data.FirebaseAuthRepository
+import com.halqa.app.data.MockData
+import com.halqa.app.data.WalletRepository
+import com.halqa.app.data.WalletSnapshot
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
+import kotlinx.coroutines.flow.flowOf
+import java.text.NumberFormat
+import java.util.Locale
+
+private val arabicLocale = Locale.forLanguageTag("ar-SA")
+
+private fun formatCount(value: Long): String =
+    NumberFormat.getInstance(arabicLocale).format(value)
 
 @Composable
 fun WalletScreen(navController: NavController) {
+    val firebaseUser by FirebaseAuthRepository.authStateFlow()
+        .collectAsState(initial = FirebaseAuthRepository.currentUser)
+    val uid = firebaseUser?.uid
+    val wallet by (
+        if (uid != null) WalletRepository.observe(uid) else flowOf(WalletSnapshot())
+    ).collectAsStateWithLifecycle(initialValue = WalletSnapshot())
+
     Column(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp, start = 8.dp, end = 16.dp),
@@ -52,7 +72,12 @@ fun WalletScreen(navController: NavController) {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            item { BalanceCard(onTopUp = { navController.navigate(Routes.TopUp) }) }
+            item {
+                BalanceCard(
+                    wallet = wallet,
+                    onTopUp = { navController.navigate(Routes.TopUp) },
+                )
+            }
             item { Spacer(Modifier.height(20.dp)) }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -67,7 +92,7 @@ fun WalletScreen(navController: NavController) {
             }
             item { Spacer(Modifier.height(20.dp)) }
             item {
-                EarningsSection()
+                EarningsSection(wallet)
                 Spacer(Modifier.height(40.dp))
             }
         }
@@ -75,7 +100,15 @@ fun WalletScreen(navController: NavController) {
 }
 
 @Composable
-private fun BalanceCard(onTopUp: () -> Unit) {
+private fun BalanceCard(wallet: WalletSnapshot, onTopUp: () -> Unit) {
+    val coinsLabel = formatCount(wallet.coins)
+    val diamondsLabel = formatCount(wallet.diamonds)
+    // Diamonds → SAR conversion is finalised by Yasser's economy spec
+    // (M2 Gift Loop): 1 diamond ≈ 0.375 SAR (375 SAR minimum withdrawal at
+    // 1000 diamonds). Surfaced as an estimate only — the real cash-out
+    // amount is computed server-side at withdrawal time.
+    val diamondsSarEstimate = (wallet.diamonds.toDouble() * 0.375)
+    val diamondsSarLabel = String.format(arabicLocale, "%.0f", diamondsSarEstimate)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -93,13 +126,13 @@ private fun BalanceCard(onTopUp: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("💰", fontSize = 28.sp)
                 Spacer(Modifier.size(8.dp))
-                Text("12,480", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                Text(coinsLabel, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.size(8.dp))
                 Text("كوين", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "Diamonds للسحب: 240 (≈90 ريال)",
+                "Diamonds للسحب: $diamondsLabel (≈$diamondsSarLabel ريال)",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
             )
@@ -183,7 +216,11 @@ private fun CoinPackageCard(pkg: CoinPackage) {
 }
 
 @Composable
-private fun EarningsSection() {
+private fun EarningsSection(wallet: WalletSnapshot) {
+    val diamondsLabel = formatCount(wallet.diamonds)
+    val diamondsSarEstimate = (wallet.diamonds.toDouble() * 0.375)
+    val diamondsSarLabel = String.format(arabicLocale, "%.0f", diamondsSarEstimate)
+    val totalEarnedLabel = formatCount(wallet.diamondsEarned)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -194,9 +231,9 @@ private fun EarningsSection() {
     ) {
         Text("📊 ملخص الأرباح", color = HalqaColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
-        EarningsRow("الأسبوع الحالي", "84 ريال")
-        EarningsRow("الشهر الحالي", "312 ريال")
-        EarningsRow("القابل للسحب", "240 Diamond ≈ 90 ريال")
+        EarningsRow("إجمالي Diamonds المكتسبة", "$totalEarnedLabel Diamond")
+        EarningsRow("الرصيد الحالي", "$diamondsLabel Diamond")
+        EarningsRow("القابل للسحب", "≈ $diamondsSarLabel ريال")
         Spacer(Modifier.height(8.dp))
         Text(
             "الحد الأدنى للسحب 375 ريال. أكمل KYC للتأهل عند 500 ريال.",

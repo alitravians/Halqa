@@ -15,7 +15,6 @@ import com.halqa.app.ui.screens.arena.AvatarBattleScreen
 import com.halqa.app.ui.screens.arena.PkArenaScreen
 import com.halqa.app.ui.screens.auth.AuthScreen
 import com.halqa.app.ui.screens.auth.EmailSignInScreen
-import com.halqa.app.ui.screens.auth.PhoneAuthScreen
 import com.halqa.app.ui.screens.auth.StaffSignInScreen
 import com.halqa.app.ui.screens.staff.StaffHomeScreen
 import com.halqa.app.ui.screens.golive.BroadcastingScreen
@@ -47,7 +46,6 @@ fun HalqaNavGraph(navController: NavHostController) {
         composable(Routes.Splash) { SplashScreen(navController) }
         composable(Routes.Onboarding) { OnboardingScreen(navController) }
         composable(Routes.Auth) { AuthScreen(navController) }
-        composable(Routes.PhoneAuth) { PhoneAuthScreen(navController) }
         composable(Routes.EmailAuth) { EmailSignInScreen(navController) }
         composable(Routes.StaffAuth) { StaffSignInScreen(navController) }
         composable(Routes.StaffHome) { StaffHomeScreen(navController) }

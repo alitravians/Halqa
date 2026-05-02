@@ -4,7 +4,6 @@ object Routes {
     const val Splash = "splash"
     const val Onboarding = "onboarding"
     const val Auth = "auth"
-    const val PhoneAuth = "phone_auth"
     const val EmailAuth = "email_auth"
     const val StaffAuth = "staff_auth"
     const val StaffHome = "staff_home"

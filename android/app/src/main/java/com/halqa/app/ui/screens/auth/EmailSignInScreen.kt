@@ -15,11 +15,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AlternateEmail
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -136,7 +137,7 @@ fun EmailSignInScreen(navController: NavController) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { navController.popBackStack() }) {
                     Icon(
-                        Icons.Filled.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "رجوع",
                         tint = HalqaColors.Text,
                     )
@@ -230,11 +231,20 @@ fun EmailSignInScreen(navController: NavController) {
 
             Spacer(Modifier.height(24.dp))
 
-            PrimaryButton(
-                text = if (loading) "جاري التحقق…" else "متابعة",
-                onClick = ::submit,
-                enabled = !loading && email.isNotBlank() && password.length >= 6,
-            )
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
+                PrimaryButton(
+                    text = if (loading) "" else "متابعة",
+                    onClick = ::submit,
+                    enabled = !loading && email.isNotBlank() && password.length >= 6,
+                )
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(20.dp))
 
