@@ -66,6 +66,7 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
         Column(modifier = Modifier.fillMaxSize()) {
             StreamHeader(
                 hostName = stream.hostName,
+                hostBadges = stream.hostBadges,
                 viewers = stream.viewers,
                 category = stream.tag,
                 onClose = { navController.popBackStack() },
@@ -102,6 +103,7 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
 @Composable
 private fun StreamHeader(
     hostName: String,
+    hostBadges: List<com.halqa.app.domain.BadgeType>,
     viewers: Int,
     category: String,
     onClose: () -> Unit,
@@ -125,7 +127,18 @@ private fun StreamHeader(
         }
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(hostName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(hostName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (hostBadges.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    com.halqa.app.ui.components.BadgeRow(
+                        badges = hostBadges,
+                        size = 14.dp,
+                        limit = 3,
+                        spacing = 3.dp,
+                    )
+                }
+            }
             Text("$category • ${viewers} مشاهد", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
         }
 

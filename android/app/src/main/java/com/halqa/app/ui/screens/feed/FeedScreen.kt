@@ -44,11 +44,29 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.halqa.app.data.MockData
 import com.halqa.app.data.StreamPreview
+import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
-private val categories = listOf("الكل", "ترفيه", "موسيقى", "ألعاب", "دردشة", "تعليم", "طبخ", "رياضة", "PK")
+// Keep this list in sync with the `category` field on every entry in
+// MockData.streams. Anything listed here but missing from MockData yields an
+// empty feed (e.g. previously "رياضة"); anything in MockData but missing here
+// is silently hidden from category-filter results (only "الكل" shows it).
+private val categories = listOf(
+    "الكل",
+    "ترفيه",
+    "موسيقى",
+    "ألعاب",
+    "دردشة",
+    "تعليم",
+    "طبخ",
+    "ثقافة",
+    "صباح",
+    "تقنية",
+    "عائلي",
+    "PK",
+)
 
 @Composable
 fun FeedScreen(navController: NavController) {
@@ -222,6 +240,10 @@ fun StreamCard(stream: StreamPreview, onClick: () -> Unit) {
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                 )
+                if (stream.hostBadges.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    BadgeRow(badges = stream.hostBadges, size = 12.dp, limit = 2, spacing = 2.dp)
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     "👥 ${formatViewers(stream.viewers)}",
@@ -235,8 +257,8 @@ fun StreamCard(stream: StreamPreview, onClick: () -> Unit) {
 
 private fun formatViewers(n: Int): String =
     when {
-        n >= 1_000_000 -> "%.1f".format(n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
-        n >= 1_000 -> "%.1f".format(n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
+        n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
+        n >= 1_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
         else -> "$n"
     }
 

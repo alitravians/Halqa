@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,7 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -191,20 +194,26 @@ private fun ToggleRow(label: String, icon: androidx.compose.ui.graphics.vector.I
         Icon(icon, contentDescription = null, tint = HalqaColors.TextMuted)
         Spacer(Modifier.size(12.dp))
         Text(label, color = HalqaColors.Text, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .size(width = 44.dp, height = 24.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (checked) HalqaColors.Brand else Color.White.copy(alpha = 0.12f)),
-            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-        ) {
+        // Force LTR layout direction for the toggle's knob alignment. The whole
+        // app forces RTL globally (MainActivity), which would otherwise flip
+        // CenterStart/CenterEnd and place the knob on the wrong physical side
+        // (Material spec: switches do not mirror in RTL).
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
             Box(
                 modifier = Modifier
-                    .padding(2.dp)
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(Color.White),
-            )
+                    .size(width = 44.dp, height = 24.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (checked) HalqaColors.Brand else Color.White.copy(alpha = 0.12f)),
+                contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(2.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                )
+            }
         }
     }
 }

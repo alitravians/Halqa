@@ -15,8 +15,8 @@ android {
         applicationId = "com.halqa.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
         vectorDrawables { useSupportLibrary = true }
         resourceConfigurations += listOf("ar", "en")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -86,7 +86,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.coil.compose)
-    implementation(libs.coil.network)
+    implementation(libs.coil.svg)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
