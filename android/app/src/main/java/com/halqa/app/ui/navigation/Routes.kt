@@ -18,6 +18,8 @@ object Routes {
     const val LiveWatch = "live/{streamId}"
     fun liveWatch(streamId: String) = "live/$streamId"
 
+    const val Broadcasting = "broadcasting"
+
     const val Wallet = "wallet"
     const val TopUp = "topup"
 

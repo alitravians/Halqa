@@ -40,7 +40,6 @@ import com.halqa.app.ui.theme.HalqaColors
 @Composable
 fun TopUpScreen(navController: NavController) {
     var selectedId by remember { mutableStateOf("p4") }
-    var method by remember { mutableStateOf("googleplay") }
 
     val pkg = MockData.coinPackages.find { it.id == selectedId } ?: MockData.coinPackages.first()
 
@@ -94,86 +93,56 @@ fun TopUpScreen(navController: NavController) {
             }
 
             Spacer(Modifier.height(20.dp))
-            Text("طريقة الدفع", color = HalqaColors.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
 
-            PaymentMethod(
-                id = "googleplay",
-                title = "Google Play",
-                subtitle = "موصى به للأمان",
-                emoji = "🟢",
-                selected = method == "googleplay",
-                onClick = { method = it },
-            )
-            Spacer(Modifier.height(8.dp))
-            PaymentMethod(
-                id = "stcpay",
-                title = "STC Pay",
-                subtitle = "خصم مباشر",
-                emoji = "💜",
-                selected = method == "stcpay",
-                onClick = { method = it },
-            )
-            Spacer(Modifier.height(8.dp))
-            PaymentMethod(
-                id = "mada",
-                title = "بطاقة مدى / Visa",
-                subtitle = "عبر بوابة آمنة",
-                emoji = "💳",
-                selected = method == "mada",
-                onClick = { method = it },
-            )
+            // Per Google Play "Payments" policy (and Layla T&S Blocker B1):
+            // in-app purchases of digital coins on Android MUST go through
+            // Google Play Billing exclusively. STC Pay, Mada, and Visa rails
+            // are intentionally NOT offered here — exposing them would risk
+            // immediate app removal from the Play Store.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(HalqaColors.Brand.copy(alpha = 0.12f))
+                    .border(1.5.dp, HalqaColors.BrandLight, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🟢", fontSize = 22.sp)
+                Spacer(Modifier.size(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Google Play",
+                        color = HalqaColors.Text,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "الدفع الآمن المعتمد لأجهزة Android",
+                        color = HalqaColors.TextMuted,
+                        fontSize = 11.sp,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(HalqaColors.Brand)
+                        .border(2.dp, HalqaColors.Brand, RoundedCornerShape(10.dp)),
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
 
             Text(
-                "بإتمام عملية الشراء فإنك توافق على شروط الاستخدام. الكوينز غير قابلة للاسترجاع.",
+                "شحن الكوينز يتم عبر فوترة Google Play. الكوينز رصيد رقمي داخل التطبيق وغير قابلة للاسترجاع بعد الاستخدام.",
                 color = HalqaColors.TextDim,
                 fontSize = 11.sp,
                 lineHeight = 18.sp,
             )
             Spacer(Modifier.height(12.dp))
-            PrimaryButton(text = "ادفع ${pkg.priceSar} ر.س", onClick = { navController.popBackStack() })
+            PrimaryButton(text = "ادفع ${pkg.priceSar} ر.س عبر Google Play", onClick = { navController.popBackStack() })
             Spacer(Modifier.height(20.dp))
         }
-    }
-}
-
-@Composable
-private fun PaymentMethod(
-    id: String,
-    title: String,
-    subtitle: String,
-    emoji: String,
-    selected: Boolean,
-    onClick: (String) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) HalqaColors.Brand.copy(alpha = 0.12f) else HalqaColors.BgElevated)
-            .border(
-                if (selected) 1.5.dp else 1.dp,
-                if (selected) HalqaColors.BrandLight else HalqaColors.Border,
-                RoundedCornerShape(14.dp),
-            )
-            .clickable { onClick(id) }
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(emoji, fontSize = 22.sp)
-        Spacer(Modifier.size(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = HalqaColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = HalqaColors.TextMuted, fontSize = 11.sp)
-        }
-        Box(
-            modifier = Modifier
-                .size(20.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (selected) HalqaColors.Brand else Color.Transparent)
-                .border(2.dp, if (selected) HalqaColors.Brand else HalqaColors.Border, RoundedCornerShape(10.dp)),
-        )
     }
 }

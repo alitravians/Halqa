@@ -51,5 +51,14 @@
                 <data android:scheme="https" android:host="halqa.app" />
             </intent-filter>
         </activity>
+
+        <!-- LiveKit publisher session keeps camera + microphone active while
+             the app is backgrounded; foregroundServiceType matches the
+             FOREGROUND_SERVICE_CAMERA and FOREGROUND_SERVICE_MICROPHONE
+             permissions declared above (Android 14+ enforced). -->
+        <service
+            android:name=".livekit.LiveBroadcastService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
     </application>
 </manifest>

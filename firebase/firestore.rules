@@ -88,16 +88,15 @@ service cloud.firestore {
 
     // -------- /streams/{streamId} --------
     // Live streams discoverable by all signed-in users.
+    // Lifecycle (create / status flip / end) is server-only via Admin SDK
+    // through /api/livekit/token + /api/streams/end. Clients NEVER write here
+    // directly — this prevents impersonation, race-condition lifecycles, and
+    // bypassing KYC/ban gates.
     match /streams/{streamId} {
       allow read: if isSignedIn();
-
-      allow create: if isSignedIn()
-        && request.resource.data.ownerUid == uid()
-        && request.resource.data.status == 'live';
-
-      allow update: if isOwner(resource.data.ownerUid) || isModerator();
-
-      allow delete: if isAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
     // -------- /audit_log/{id} (system audit log) --------
@@ -119,13 +118,13 @@ service cloud.firestore {
     }
 
     // -------- /bans/{banId} --------
+    // Server-only writes (Admin SDK through staff actions API). Clients can
+    // only read their own ban + staff can read all.
     match /bans/{banId} {
       allow read: if isStaff()
         || (isSignedIn() && resource.data.userId == uid());
 
-      allow create: if isModerator();
-      allow update: if isStaff();
-      allow delete: if isAdmin();
+      allow write: if false;
     }
   }
 }
