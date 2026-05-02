@@ -139,6 +139,19 @@ fun AuthScreen(navController: NavController) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            // Staff entry point. Lives at the bottom of the regular auth screen
+            // so it's discoverable to fa9riq members but visually de-emphasised
+            // for everyone else — staff still need a clear, signed-in path
+            // (not a hidden trick) so we keep the link visible rather than
+            // gating it behind a long-press easter egg.
+            TextLinkButton(
+                text = "تسجيل دخول الموظفين",
+                onClick = { navController.navigate(Routes.StaffAuth) },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
