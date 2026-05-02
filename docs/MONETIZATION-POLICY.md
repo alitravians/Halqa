@@ -35,6 +35,14 @@ These are enforced in `backend/src/lib/kyc-allowlist.ts :: assertProdSafe()` and
 - **NDA on every tester.** Every UID added to `KYC_BETA_ALLOWLIST` must have a signed NDA on file (see `docs/legal/NDA-Beta-Tester-AR.md`).
 - **Privacy policy disclosed in app.** First launch shows the privacy policy and requires acknowledgment.
 
+### 3.1) Saudi e-commerce framing (Faisal — compliance review)
+
+خلال البيتا المغلقة، لا تتوفر أي عمليات شحن مدفوعة (paid top-up). يحصل كل مختبِر على منحة مجانية قدرها 1000 كوينز كل 24 ساعة. الكوينز والهدايا الافتراضية في هذه المرحلة ليس لها قيمة نقدية وغير قابلة للاسترداد أو التحويل أو التداول. يُفعَّل الشحن المدفوع فقط بعد استكمال السجل التجاري وتسجيل ZATCA لضريبة القيمة المضافة (15%) وربط الفوترة الإلكترونية Fatoora.
+
+### 3.2) KYC bypass time cap
+
+`BYPASS_KYC_FOR_BETA` expires 14 calendar days after first activation; after expiry, KYC verification becomes mandatory for all testers. Extension requires written approval from compliance lead.
+
 ## 4) Live Launch Checklist
 
 Before flipping `MONETIZATION_MODE=live`:
@@ -54,6 +62,6 @@ Before flipping `MONETIZATION_MODE=live`:
 | Env var | Type | Default | Purpose |
 |---|---|---|---|
 | `MONETIZATION_MODE` | `beta` \| `live` | `beta` | Stage selector. Unset = beta. |
-| `BYPASS_KYC_FOR_BETA` | `true` \| `false` | `false` | Legacy global KYC bypass. Logs a warning every grant. Replaced by `KYC_BETA_ALLOWLIST`. |
+| `BYPASS_KYC_FOR_BETA` | `true` \| `false` | `false` | Legacy global KYC bypass. Logs a warning every grant. Replaced by `KYC_BETA_ALLOWLIST`. **Expires 14 calendar days after first activation; extension requires compliance-lead written approval.** |
 | `KYC_BETA_ALLOWLIST` | CSV of UIDs | empty | Per-UID KYC bypass for trusted testers. |
 | `BYPASS_TOPUP_FOR_BETA` | `true` \| `false` | `false` | Enables `/wallet/topup` in beta. |
