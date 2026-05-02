@@ -15,8 +15,8 @@ export function formatCoins(n: number, locale: string = "ar"): string {
   return formatNumber(n, locale);
 }
 
-export function diamondsToUSD(diamonds: number, ratePercent: number = 40): number {
-  return (diamonds * 0.01 * ratePercent) / 100;
+export function diamondsToUSD(diamonds: number, ratePercent: number = 45): number {
+  return (diamonds * 0.10 * ratePercent) / 100;
 }
 
 export function generateHandle(name: string): string {
