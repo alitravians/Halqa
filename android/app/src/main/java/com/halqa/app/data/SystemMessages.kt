@@ -18,20 +18,34 @@ import com.halqa.app.domain.ViolationCategory
  */
 object SystemMessages {
 
-    /** Demo open review — used by [UnderReviewScreen] for the countdown. */
-    val demoOpenReview: StreamReview = run {
-        val now = System.currentTimeMillis()
-        StreamReview(
-            id = "rev_demo_001",
-            streamId = "s7",
-            hostName = "د.هند",
-            openedAtEpochMs = now,
-            autoCloseAtEpochMs = now + AUTO_REVIEW_WINDOW_MS,
-            suspectedCategory = ViolationCategory.MinorAppearance,
-            state = StreamReviewState.UnderReview,
-            notesAr = "اشتبه النظام بظهور قاصر في إطار الكاميرا. يتم تحليل عيّنات الفيديو الآن.",
-        )
-    }
+    /**
+     * Demo open review — used by [UnderReviewScreen] for the countdown.
+     *
+     * Implemented as a `get` (not `val`) so [StreamReview.openedAtEpochMs] is
+     * computed at the time the user actually navigates to the under-review
+     * screen, not at the moment `SystemMessages` is first initialised. With a
+     * cached `val`, opening the Inbox tab would start the 10-minute window
+     * while the user is browsing other messages, so by the time they tap the
+     * "بثك تحت المراجعة" row the countdown could already be partially or
+     * fully expired. Recomputing on each read keeps the demo timer honest.
+     *
+     * In Phase E this whole object is replaced by a real `Inbox` Retrofit
+     * feed; the live timer values come from the backend.
+     */
+    val demoOpenReview: StreamReview
+        get() {
+            val now = System.currentTimeMillis()
+            return StreamReview(
+                id = "rev_demo_001",
+                streamId = "s7",
+                hostName = "د.هند",
+                openedAtEpochMs = now,
+                autoCloseAtEpochMs = now + AUTO_REVIEW_WINDOW_MS,
+                suspectedCategory = ViolationCategory.MinorAppearance,
+                state = StreamReviewState.UnderReview,
+                notesAr = "اشتبه النظام بظهور قاصر في إطار الكاميرا. يتم تحليل عيّنات الفيديو الآن.",
+            )
+        }
 
     /** Demo final verdict — used by [ReviewResultScreen]. */
     val demoVerdict: Pair<ViolationCategory, PenaltyTier> =

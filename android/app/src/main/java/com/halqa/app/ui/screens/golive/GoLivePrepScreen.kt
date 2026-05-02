@@ -38,11 +38,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,11 +79,31 @@ fun GoLivePrepScreen(navController: NavController) {
 
     val context = LocalContext.current
 
-    // Send the user to the one-time AgeGate the first time they open this screen.
-    LaunchedEffect(Unit) {
-        if (!SafetyPrefs.hasAcceptedAgeGate()) {
-            navController.navigate(Routes.AgeGate)
+    // Re-read the in-memory acceptance flag whenever this screen returns to the
+    // foreground (e.g. after the user navigated to AgeGateScreen and came back).
+    // We deliberately *do not* auto-`navigate(AgeGate)` from a LaunchedEffect:
+    // that pattern caused a navigation loop when the user tapped Cancel on the
+    // gate (gate pops back here -> LaunchedEffect fires again -> gate again).
+    // Instead, when the gate is not yet accepted, we render an inline
+    // [AgeGateInlineNotice] inside the Live tab. The user has a single explicit
+    // CTA to open the AgeGate route, can cancel safely from inside it, and is
+    // free to switch tabs (the NavigationBar is still visible).
+    var ageGateAccepted by remember { mutableStateOf(SafetyPrefs.hasAcceptedAgeGate()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                ageGateAccepted = SafetyPrefs.hasAcceptedAgeGate()
+            }
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (!ageGateAccepted) {
+        AgeGateInlineNotice(
+            onOpenAgeGate = { navController.navigate(Routes.AgeGate) },
+        )
+        return
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -393,5 +416,74 @@ private fun ToggleRow(label: String, icon: ImageVector) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Full-screen blocker shown inside the Live tab whenever
+ * [SafetyPrefs.hasAcceptedAgeGate] is false. Replaces the previous
+ * `LaunchedEffect { navigate(Routes.AgeGate) }` redirect that produced an
+ * infinite loop when users cancelled the gate (the gate would re-pop here and
+ * the effect would fire again).
+ *
+ * The bottom NavigationBar is still visible so the user can always switch
+ * tabs to leave; the only forward action is the explicit "افتح ميثاق
+ * التعهّدات" button.
+ */
+@Composable
+private fun AgeGateInlineNotice(onOpenAgeGate: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(HalqaColors.Bg)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(HalqaColors.Danger.copy(alpha = 0.18f))
+                .border(1.dp, HalqaColors.Danger.copy(alpha = 0.5f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = HalqaColors.Danger, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "البث المباشر يحتاج تعهّد سلامة أوّلاً",
+            color = HalqaColors.Text,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.ExtraBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "قبل بثك الأول، اقرأ ميثاق السلامة و وقّع على ثلاثة تعهّدات: العمر 18+، عدم ظهور قاصرين، و قبول مراجعة المخالفات لمدة 10 دقائق. هذا إلزامي لجميع المذيعين.",
+            color = HalqaColors.TextMuted,
+            fontSize = 14.sp,
+            lineHeight = 22.sp,
+        )
+        Spacer(Modifier.height(24.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(HalqaColors.BgElevated)
+                .border(1.dp, HalqaColors.Border, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+        ) {
+            ReminderLine(icon = Icons.Filled.Warning, text = "ممنوع منعاً باتاً البث لمن هم دون 18 سنة.")
+            ReminderLine(icon = Icons.Filled.ChildCare, text = "ممنوع ظهور أي قاصر في إطار الكاميرا.")
+            ReminderLine(icon = Icons.Filled.Gavel, text = "نظام المراقبة الذاتي يفتح مراجعة 10 دقائق ثم يُصدر العقوبة.")
+        }
+        Spacer(Modifier.height(24.dp))
+        PrimaryButton(text = "افتح ميثاق التعهّدات", onClick = onOpenAgeGate)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "يمكنك التنقّل لتبويب آخر في أي وقت من الشريط السفلي.",
+            color = HalqaColors.TextMuted,
+            fontSize = 12.sp,
+        )
     }
 }
