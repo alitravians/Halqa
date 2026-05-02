@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.History
@@ -26,7 +27,6 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,13 +40,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.halqa.app.data.MockData
+import com.halqa.app.ui.components.BadgePill
+import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(navController: NavController) {
+    val user = MockData.currentUser
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -70,22 +75,32 @@ fun ProfileScreen(navController: NavController) {
                         .border(3.dp, HalqaColors.Bg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("ع", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(user.displayName.first().toString(), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.padding(top = 40.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("علي", color = HalqaColors.Text, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(Modifier.size(6.dp))
-                        Icon(Icons.Filled.Verified, contentDescription = null, tint = HalqaColors.BrandLight, modifier = Modifier.size(20.dp))
+                        Text(user.displayName, color = HalqaColors.Text, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(Modifier.size(8.dp))
+                        BadgeRow(badges = user.badges, size = 18.dp, limit = 3)
                     }
-                    Text("@ali_traveler", color = HalqaColors.TextMuted, fontSize = 13.sp)
+                    Text(user.handle, color = HalqaColors.TextMuted, fontSize = 13.sp)
+                }
+            }
+
+            if (user.badges.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    user.badges.forEach { BadgePill(type = it) }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
             Text(
-                "حلقتك تبدأ هنا 🎤 — أحب البث، السفر، والتقنية.",
+                user.bio,
                 color = HalqaColors.Text,
                 fontSize = 14.sp,
                 lineHeight = 22.sp,
@@ -93,10 +108,10 @@ fun ProfileScreen(navController: NavController) {
 
             Spacer(Modifier.height(16.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Stat("12.4K", "المتابعون")
-                Stat("180", "المتابَعون")
-                Stat("LV 14", "المستوى")
-                Stat("🔥 27", "حلقة")
+                Stat(formatStat(user.followers), "المتابعون")
+                Stat(user.following.toString(), "المتابَعون")
+                Stat("LV ${user.level}", "المستوى")
+                Stat("🔥 ${user.streamsHosted}", "حلقة")
             }
 
             Spacer(Modifier.height(20.dp))
@@ -148,6 +163,13 @@ fun ProfileScreen(navController: NavController) {
         }
     }
 }
+
+private fun formatStat(n: Int): String =
+    when {
+        n >= 1_000_000 -> "%.1f".format(n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
+        n >= 1_000 -> "%.1f".format(n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
+        else -> "$n"
+    }
 
 @Composable
 private fun Stat(value: String, label: String) {

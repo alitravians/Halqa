@@ -1,5 +1,7 @@
 package com.halqa.app.data
 
+import com.halqa.app.domain.BadgeType
+
 data class StreamPreview(
     val id: String,
     val title: String,
@@ -11,6 +13,23 @@ data class StreamPreview(
     val tag: String,
     val coverHue: Int,
     val isPk: Boolean = false,
+    val hostBadges: List<BadgeType> = emptyList(),
+)
+
+/**
+ * The signed-in user's identity surface (for the Profile screen and any
+ * future "who am I" reads). Until we have a real Auth/User repo this is a
+ * mock object hosted on [MockData].
+ */
+data class CurrentUser(
+    val displayName: String,
+    val handle: String,
+    val bio: String,
+    val followers: Int,
+    val following: Int,
+    val level: Int,
+    val streamsHosted: Int,
+    val badges: List<BadgeType>,
 )
 
 data class ChatMsg(
@@ -50,18 +69,79 @@ data class PkMode(
 
 object MockData {
     val streams: List<StreamPreview> = listOf(
-        StreamPreview("s1", "حلقة الترفيه المسائية 🎤", "عبدالله الفنان", "abdulla.fnan", 1, 12_400, "ترفيه", "🔥 رائج", 280),
-        StreamPreview("s2", "حلقة دردشة ودية", "نورة الكاتبة", "noura.kateb", 2, 3_240, "دردشة", "💬 دردشة", 320, isPk = true),
-        StreamPreview("s3", "موسيقى وعود مباشر", "خالد العود", "khalid.oud", 3, 8_120, "موسيقى", "🎵 موسيقى", 200),
-        StreamPreview("s4", "ألعاب فيفا — تحدي PK", "فهد جيمر", "fahad.gamer", 4, 5_460, "ألعاب", "🎮 PK", 30, isPk = true),
-        StreamPreview("s5", "ركن الشعر النبطي", "محمد الشاعر", "m.shaer", 5, 1_180, "ثقافة", "📜 شعر", 250),
-        StreamPreview("s6", "قهوة الصباح ☕", "ريم الخبيرة", "reem.k", 6, 940, "صباح", "☕ صباح", 350),
-        StreamPreview("s7", "تعلم الإنجليزية مباشر", "د.هند", "dr.hind", 7, 2_330, "تعليم", "🎓 تعليم", 180),
-        StreamPreview("s8", "حلقة طبخ خليجي", "أم سارة", "om.sara", 8, 4_120, "طبخ", "👩‍🍳 طبخ", 20),
-        StreamPreview("s9", "تحدي الرياضيات السريع", "علي العالم", "ali.alalim", 9, 760, "تعليم", "🧠 تحدي", 220),
-        StreamPreview("s10", "كاريوكي عربي PK", "سارة المغنية", "sara.sing", 10, 9_870, "موسيقى", "🎤 PK", 300, isPk = true),
-        StreamPreview("s11", "حلقة استشارات تقنية", "م. يزيد", "yazeed.dev", 11, 480, "تقنية", "💻 تقنية", 210),
-        StreamPreview("s12", "بث عائلي عام", "بيت الذكريات", "byt.zik", 12, 1_640, "عائلي", "👨‍👩‍👧 عائلي", 340),
+        StreamPreview(
+            "s1", "حلقة الترفيه المسائية 🎤", "عبدالله الفنان", "abdulla.fnan", 1, 12_400,
+            "ترفيه", "🔥 رائج", 280,
+            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified, BadgeType.TopCreator),
+        ),
+        StreamPreview(
+            "s2", "حلقة دردشة ودية", "نورة الكاتبة", "noura.kateb", 2, 3_240,
+            "دردشة", "💬 دردشة", 320, isPk = true,
+            hostBadges = listOf(BadgeType.KycVerified, BadgeType.FoundingCreator),
+        ),
+        StreamPreview(
+            "s3", "موسيقى وعود مباشر", "خالد العود", "khalid.oud", 3, 8_120,
+            "موسيقى", "🎵 موسيقى", 200,
+            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified),
+        ),
+        StreamPreview(
+            "s4", "ألعاب فيفا — تحدي PK", "فهد جيمر", "fahad.gamer", 4, 5_460,
+            "ألعاب", "🎮 PK", 30, isPk = true,
+            hostBadges = listOf(BadgeType.KycVerified),
+        ),
+        StreamPreview(
+            "s5", "ركن الشعر النبطي", "محمد الشاعر", "m.shaer", 5, 1_180,
+            "ثقافة", "📜 شعر", 250,
+            hostBadges = listOf(BadgeType.FoundingCreator),
+        ),
+        StreamPreview(
+            "s6", "قهوة الصباح ☕", "ريم الخبيرة", "reem.k", 6, 940,
+            "صباح", "☕ صباح", 350,
+            hostBadges = listOf(BadgeType.Staff),
+        ),
+        StreamPreview(
+            "s7", "تعلم الإنجليزية مباشر", "د.هند", "dr.hind", 7, 2_330,
+            "تعليم", "🎓 تعليم", 180,
+            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified),
+        ),
+        StreamPreview(
+            "s8", "حلقة طبخ خليجي", "أم سارة", "om.sara", 8, 4_120,
+            "طبخ", "👩‍🍳 طبخ", 20,
+            hostBadges = listOf(BadgeType.KycVerified, BadgeType.FoundingCreator),
+        ),
+        StreamPreview(
+            "s9", "تحدي الرياضيات السريع", "علي العالم", "ali.alalim", 9, 760,
+            "تعليم", "🧠 تحدي", 220,
+        ),
+        StreamPreview(
+            "s10", "كاريوكي عربي PK", "سارة المغنية", "sara.sing", 10, 9_870,
+            "موسيقى", "🎤 PK", 300, isPk = true,
+            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.TopCreator),
+        ),
+        StreamPreview(
+            "s11", "حلقة استشارات تقنية", "م. يزيد", "yazeed.dev", 11, 480,
+            "تقنية", "💻 تقنية", 210,
+            hostBadges = listOf(BadgeType.Moderator, BadgeType.KycVerified),
+        ),
+        StreamPreview(
+            "s12", "بث عائلي عام", "بيت الذكريات", "byt.zik", 12, 1_640,
+            "عائلي", "👨‍👩‍👧 عائلي", 340,
+        ),
+    )
+
+    val currentUser: CurrentUser = CurrentUser(
+        displayName = "علي",
+        handle = "@ali_traveler",
+        bio = "حلقتك تبدأ هنا 🎤 — أحب البث، السفر، والتقنية.",
+        followers = 12_400,
+        following = 180,
+        level = 14,
+        streamsHosted = 27,
+        badges = listOf(
+            BadgeType.VerifiedAgency,
+            BadgeType.KycVerified,
+            BadgeType.FoundingCreator,
+        ),
     )
 
     val gifts: List<Gift> = listOf(

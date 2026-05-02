@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.halqa.app.data.MockData
 import com.halqa.app.data.StreamPreview
+import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
@@ -222,6 +223,10 @@ fun StreamCard(stream: StreamPreview, onClick: () -> Unit) {
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                 )
+                if (stream.hostBadges.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    BadgeRow(badges = stream.hostBadges, size = 12.dp, limit = 2, spacing = 2.dp)
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     "👥 ${formatViewers(stream.viewers)}",
