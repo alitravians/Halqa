@@ -39,13 +39,49 @@ object FirebaseAuthRepository {
      * exist yet, then signs in. Used for the very first staff bootstrap so
      * Ali can ship without manually provisioning every account in the Firebase
      * Console.
+     *
+     * Modern Firebase SDKs (>= 22.x) collapse "user not found" and "wrong
+     * password" into a single `FirebaseAuthInvalidCredentialsException` to
+     * prevent user enumeration. We therefore probe with
+     * `fetchSignInMethodsForEmail`: if there are no providers, the email is
+     * unregistered and we create; if there are, we surface the original
+     * sign-in failure (most likely a wrong password) untouched.
      */
     suspend fun signInOrCreateWithEmail(email: String, password: String): FirebaseUser {
+        val trimmed = email.trim()
         return try {
-            signInWithEmail(email, password)
-        } catch (_: com.google.firebase.auth.FirebaseAuthInvalidUserException) {
-            val res = auth.createUserWithEmailAndPassword(email.trim(), password).await()
-            res.user ?: error("Firebase user creation returned null")
+            signInWithEmail(trimmed, password)
+        } catch (
+            t: com.google.firebase.auth.FirebaseAuthException,
+        ) {
+            val isUnknownUser = when (t) {
+                is com.google.firebase.auth.FirebaseAuthInvalidUserException -> true
+                is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException ->
+                    !accountExists(trimmed)
+                else -> false
+            }
+            if (isUnknownUser) {
+                val res = auth.createUserWithEmailAndPassword(trimmed, password).await()
+                res.user ?: error("Firebase user creation returned null")
+            } else {
+                throw t
+            }
+        }
+    }
+
+    /**
+     * Returns true when Firebase Auth has at least one provider record for
+     * [email] (i.e. the account exists). Used to disambiguate the unified
+     * INVALID_LOGIN_CREDENTIALS error.
+     */
+    private suspend fun accountExists(email: String): Boolean {
+        return try {
+            val res = auth.fetchSignInMethodsForEmail(email).await()
+            !res.signInMethods.isNullOrEmpty()
+        } catch (_: Throwable) {
+            // Network or other failure — assume the user *might* exist; let
+            // the original error bubble up rather than silently overwriting.
+            true
         }
     }
 
