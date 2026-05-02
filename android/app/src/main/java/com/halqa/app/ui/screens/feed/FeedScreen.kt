@@ -41,18 +41,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import com.halqa.app.data.MockData
 import com.halqa.app.data.StreamPreview
+import com.halqa.app.data.StreamsRepository
 import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
-// Keep this list in sync with the `category` field on every entry in
-// MockData.streams. Anything listed here but missing from MockData yields an
-// empty feed (e.g. previously "رياضة"); anything in MockData but missing here
-// is silently hidden from category-filter results (only "الكل" shows it).
 private val categories = listOf(
     "الكل",
     "ترفيه",
@@ -71,30 +68,77 @@ private val categories = listOf(
 @Composable
 fun FeedScreen(navController: NavController) {
     var category by remember { mutableStateOf("الكل") }
-    val streams = MockData.streams.let {
-        if (category == "الكل") it
-        else if (category == "PK") it.filter { s -> s.isPk }
-        else it.filter { s -> s.category == category }
+    val liveStreams by StreamsRepository.liveStreams()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val previews = remember(liveStreams) {
+        liveStreams.mapIndexed { idx, s ->
+            StreamPreview(
+                id = s.streamId,
+                title = s.title,
+                hostName = s.title.substringBefore(" ").take(20),
+                hostHandle = s.ownerUid.take(8),
+                avatarSeed = (s.ownerUid.hashCode() and 0x7fffffff) % 360,
+                viewers = s.viewerCount,
+                category = "الكل",
+                tag = "🔴 مباشر",
+                coverHue = (idx * 37) % 360,
+            )
+        }
     }
+    val visible = if (category == "الكل") previews
+        else if (category == "PK") previews.filter { it.title.contains("PK") }
+        else previews.filter { it.category == category || it.title.contains(category) }
 
     Column(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         FeedHeader(navController)
         CategoryRow(selected = category, onSelect = { category = it })
         Spacer(Modifier.height(8.dp))
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(streams, key = { it.id }) { s ->
-                StreamCard(stream = s, onClick = {
-                    navController.navigate(Routes.liveWatch(s.id))
-                })
+        if (visible.isEmpty()) {
+            EmptyFeedState()
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(visible, key = { it.id }) { s ->
+                    StreamCard(stream = s, onClick = {
+                        navController.navigate(Routes.liveWatch(s.id))
+                    })
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun EmptyFeedState() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("📡", fontSize = 56.sp)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "لا توجد حلقات مباشرة الآن",
+            color = HalqaColors.Text,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "كن أول من يبدأ — اضغط زر البث المباشر في الشريط السفلي.",
+            color = HalqaColors.TextMuted,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
     }
 }
 

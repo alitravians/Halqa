@@ -31,4 +31,6 @@ enum class UserRole(val rank: Int, val arabicLabel: String) {
     /** True when this role can access *any* staff-restricted screen. */
     val hasStaffPower: Boolean
         get() = this == Scout || this == Moderator || this == Staff || this == Admin
+
+    companion object
 }

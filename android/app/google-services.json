@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "404176183663",
+    "project_id": "halqa-prod",
+    "storage_bucket": "halqa-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:404176183663:android:1ce667da2862188ad7489a",
+        "android_client_info": {
+          "package_name": "com.halqa.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAP9qm7AV64eq7-U454wUZhCAkcOOd4zMI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

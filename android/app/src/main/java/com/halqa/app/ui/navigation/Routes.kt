@@ -27,6 +27,8 @@ object Routes {
 
     const val Settings = "settings"
     const val Kyc = "kyc"
+    const val EditProfile = "edit_profile"
+    const val StreamHistory = "stream_history"
     const val Terms = "terms"
     const val Privacy = "privacy"
     const val Community = "community"

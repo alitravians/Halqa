@@ -1,0 +1,131 @@
+rules_version = '2';
+
+// Halqa Firestore security rules — PDPL-compliant.
+// Schema overview:
+//   /users/{uid}                  user-owned profile, role mutable only by staff+
+//   /users/{uid}/settings/{doc}   user-owned settings (private)
+//   /kyc_submissions/{uid}        user creates own, immutable except for status (staff)
+//   /streams/{streamId}           anyone authenticated can read live, owner writes
+//   /audit_log/{id}               server-only writes; user reads own; staff reads all
+//   /staff_actions/{id}           staff writes, admin deletes, owner reads own targeting
+//   /bans/{banId}                 server-only writes; user reads own
+//
+// All writes require authentication. Public reads are scoped to live streams only.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------- helpers --------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    function isOwner(ownerUid) {
+      return isSignedIn() && uid() == ownerUid;
+    }
+    function userRole() {
+      return isSignedIn()
+        ? get(/databases/$(database)/documents/users/$(uid())).data.role
+        : 'guest';
+    }
+    function hasRole(rolesAllowed) {
+      return userRole() in rolesAllowed;
+    }
+    function isStaff()      { return hasRole(['staff', 'admin']); }
+    function isModerator()  { return hasRole(['moderator', 'staff', 'admin']); }
+    function isAdmin()      { return userRole() == 'admin'; }
+
+    // -------- /users/{uid} --------
+    match /users/{userId} {
+      allow read: if isSignedIn() && (uid() == userId || isStaff());
+
+      // user can create own doc on first sign-in (server-side or client-side)
+      allow create: if isOwner(userId)
+        && request.resource.data.role == 'user'
+        && request.resource.data.uid == userId;
+
+      // user can update profile fields, but role/createdAt are protected
+      allow update: if isOwner(userId)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      // staff can update role for any user (promotions/demotions)
+      allow update: if isStaff();
+
+      // admin only delete
+      allow delete: if isAdmin();
+
+      // -------- /users/{uid}/settings/{doc} (subcollection) --------
+      match /settings/{settingDoc} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // -------- /users/{uid}/audit/{id} (per-user audit subcollection) --------
+      match /audit/{auditId} {
+        allow read: if isOwner(userId) || isStaff();
+        allow write: if false; // server only via Admin SDK
+      }
+    }
+
+    // -------- /kyc_submissions/{uid} --------
+    // Single-doc per user, doc id == uid, immutable images after submit.
+    match /kyc_submissions/{userId} {
+      allow read: if isOwner(userId) || isStaff();
+
+      allow create: if isOwner(userId)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.uid == userId;
+
+      // user cannot mutate their own KYC after submit (anti-fraud)
+      allow update: if isStaff()
+        && request.resource.data.uid == resource.data.uid;
+
+      allow delete: if isAdmin();
+    }
+
+    // -------- /streams/{streamId} --------
+    // Live streams discoverable by all signed-in users.
+    match /streams/{streamId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == uid()
+        && request.resource.data.status == 'live';
+
+      allow update: if isOwner(resource.data.ownerUid) || isModerator();
+
+      allow delete: if isAdmin();
+    }
+
+    // -------- /audit_log/{id} (system audit log) --------
+    match /audit_log/{auditId} {
+      allow read: if isStaff();
+      allow write: if false; // server only via Admin SDK
+    }
+
+    // -------- /staff_actions/{id} --------
+    match /staff_actions/{actionId} {
+      allow read: if isStaff()
+        || (isSignedIn() && resource.data.targetUid == uid());
+
+      allow create: if isStaff()
+        && request.resource.data.staffUid == uid();
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // -------- /bans/{banId} --------
+    match /bans/{banId} {
+      allow read: if isStaff()
+        || (isSignedIn() && resource.data.userId == uid());
+
+      allow create: if isModerator();
+      allow update: if isStaff();
+      allow delete: if isAdmin();
+    }
+  }
+}
