@@ -71,6 +71,7 @@ fun BroadcastingScreen(navController: NavController) {
             is BroadcastState.Live -> {
                 HalqaVideoRenderer(
                     track = s.localVideo,
+                    room = BroadcastSession.activeRoom,
                     modifier = Modifier.fillMaxSize(),
                     mirror = true,
                 )

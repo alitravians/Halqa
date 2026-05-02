@@ -1,6 +1,7 @@
 package com.halqa.app.livekit
 
 import android.content.Context
+import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.LiveKitTokenRequest
 import io.livekit.android.ConnectOptions
@@ -39,6 +40,14 @@ object WatchSession {
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
     private var connectJob: Job? = null
+    private var viewerCountJob: Job? = null
+
+    /**
+     * The active LiveKit [Room], if any. Exposed read-only so the Compose
+     * video renderer can call [Room.initVideoRenderer] before binding the
+     * remote video track — required to actually display the stream.
+     */
+    val activeRoom: Room? get() = room
 
     fun start(appContext: Context, streamId: String, ownerUid: String?) {
         cleanup()
@@ -74,8 +83,20 @@ object WatchSession {
                     streamId = streamId,
                     remoteVideo = currentVideoTrack(newRoom),
                     ownerUid = ownerUid,
-                    viewerCount = newRoom.remoteParticipants.size,
+                    viewerCount = 0,
                 )
+
+                // Authoritative viewer count comes from the backend
+                // (LiveKit webhook → Firestore). See StreamsRepository.
+                viewerCountJob?.cancel()
+                viewerCountJob = scope.launch {
+                    StreamsRepository.viewerCount(streamId).collect { count ->
+                        val cur = _state.value as? WatchState.Watching ?: return@collect
+                        if (cur.streamId == streamId) {
+                            _state.value = cur.copy(viewerCount = count)
+                        }
+                    }
+                }
             } catch (_: kotlinx.coroutines.CancellationException) {
                 // Superseded by another start() — leave state to the caller.
             } catch (t: Throwable) {
@@ -93,6 +114,11 @@ object WatchSession {
     private fun onRoomEvent(event: RoomEvent) {
         val r = room ?: return
         when (event) {
+            // Track-level events still drive the remote video binding —
+            // we need to re-resolve which RemoteVideoTrack to render
+            // when the publisher (un)subscribes camera. The viewer
+            // count, on the other hand, comes from Firestore, never
+            // from `r.remoteParticipants.size`.
             is RoomEvent.TrackSubscribed,
             is RoomEvent.TrackUnsubscribed,
             is RoomEvent.ParticipantConnected,
@@ -100,7 +126,6 @@ object WatchSession {
                 val current = _state.value as? WatchState.Watching ?: return
                 _state.value = current.copy(
                     remoteVideo = currentVideoTrack(r),
-                    viewerCount = r.remoteParticipants.size,
                 )
             }
             is RoomEvent.Disconnected -> {
