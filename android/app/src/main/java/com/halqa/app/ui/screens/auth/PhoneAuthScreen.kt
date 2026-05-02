@@ -1,6 +1,8 @@
 package com.halqa.app.ui.screens.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,10 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -31,14 +33,21 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.halqa.app.data.Countries
 import com.halqa.app.ui.components.HalqaTextField
 import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
+/**
+ * Phone-number entry step for the OTP sign-up flow. Defaults to Saudi Arabia (+966) and
+ * lets the user switch to any country via the [CountryPickerDialog].
+ */
 @Composable
 fun PhoneAuthScreen(navController: NavController) {
     var phone by remember { mutableStateOf("") }
+    var country by remember { mutableStateOf(Countries.saudiArabia) }
+    var pickerOpen by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         Column(
@@ -70,7 +79,7 @@ fun PhoneAuthScreen(navController: NavController) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "سنرسل لك رمز تحقق مرة واحدة (OTP) للتأكد من ملكية الرقم.",
+                "اختر الدولة ثم أدخل رقمك. سنرسل لك رمز تحقق مرة واحدة (OTP).",
                 color = HalqaColors.TextMuted,
                 fontSize = 14.sp,
             )
@@ -82,36 +91,69 @@ fun PhoneAuthScreen(navController: NavController) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
+                Row(
                     modifier = Modifier
                         .height(56.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(alpha = 0.04f))
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center,
+                        .border(1.dp, HalqaColors.BorderStrong, RoundedCornerShape(16.dp))
+                        .clickable { pickerOpen = true }
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text("🇸🇦  +966", color = HalqaColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(country.flag, fontSize = 22.sp)
+                    Text(
+                        "+${country.dial}",
+                        color = HalqaColors.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = "تغيير الدولة",
+                        tint = HalqaColors.TextMuted,
+                    )
                 }
 
                 HalqaTextField(
                     value = phone,
-                    onValueChange = {
-                        val digits = it.filter { c -> c.isDigit() }
-                        if (digits.length <= 10) phone = digits
+                    onValueChange = { input ->
+                        val digits = input.filter { c -> c.isDigit() }
+                        phone = digits.take(country.maxDigits)
                     },
                     modifier = Modifier.weight(1f),
-                    placeholder = "5✕ ✕✕✕ ✕✕✕✕",
+                    placeholder = "رقم الجوال",
                     keyboardType = KeyboardType.Phone,
                 )
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "${country.nameAr} • +${country.dial}",
+                color = HalqaColors.TextDim,
+                fontSize = 12.sp,
+            )
 
             Spacer(Modifier.height(24.dp))
 
             PrimaryButton(
                 text = "إرسال رمز التحقق",
                 onClick = { navController.navigate(Routes.Main) { popUpTo(Routes.Auth) { inclusive = true } } },
-                enabled = phone.length >= 9,
+                enabled = phone.length >= minOf(7, country.maxDigits),
             )
         }
+    }
+
+    if (pickerOpen) {
+        CountryPickerDialog(
+            onDismiss = { pickerOpen = false },
+            onPick = {
+                country = it
+                phone = ""
+                pickerOpen = false
+            },
+        )
     }
 }
