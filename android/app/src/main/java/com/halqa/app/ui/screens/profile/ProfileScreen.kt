@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -59,7 +60,7 @@ fun ProfileScreen(navController: NavController) {
                 .background(Brush.linearGradient(listOf(Color(0xFF1F1144), Color(0xFF0A0A1A)))),
         )
 
-        Column(modifier = Modifier.padding(horizontal = 16.dp).offset()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp).offset(y = (-48).dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Box(
                     modifier = Modifier
@@ -147,8 +148,6 @@ fun ProfileScreen(navController: NavController) {
         }
     }
 }
-
-private fun Modifier.offset(): Modifier = this.padding(top = 0.dp).then(Modifier).also { /* keep simple */ }
 
 @Composable
 private fun Stat(value: String, label: String) {

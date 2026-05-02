@@ -73,7 +73,7 @@ fun GoldButton(
             .let { if (fillMaxWidth) it.fillMaxWidth() else it }
             .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(HalqaGradients.Gold),
+            .background(if (enabled) HalqaGradients.Gold else Brush.linearGradient(listOf(Color.Gray, Color.DarkGray))),
         contentAlignment = Alignment.Center,
     ) {
         Button(
@@ -83,6 +83,7 @@ fun GoldButton(
                 containerColor = Color.Transparent,
                 disabledContainerColor = Color.Transparent,
                 contentColor = Color(0xFF111111),
+                disabledContentColor = Color(0xFF111111).copy(alpha = 0.5f),
             ),
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
