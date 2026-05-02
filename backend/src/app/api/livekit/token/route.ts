@@ -57,15 +57,25 @@ export async function POST(req: NextRequest) {
 
     if (role === "publisher") {
       // P0 — only KYC-approved users may broadcast.
-      const kycSnap = await db.collection("kyc_submissions").doc(user.uid).get();
-      const kycStatus = kycSnap.exists
-        ? (kycSnap.data()?.status as string | undefined)
-        : undefined;
-      if (kycStatus !== "approved") {
-        throw new HttpError(
-          403,
-          "Publisher access requires approved KYC. Submit KYC and wait for review."
-        );
+      // Closed-beta override: setting BYPASS_KYC_FOR_BETA=true on Vercel skips
+      // the KYC gate so the team can dogfood broadcasting before the KYC review
+      // tool is wired up. MUST be flipped back to off (or removed) before public
+      // launch — Layla's blocker B2.
+      const bypassKyc = process.env.BYPASS_KYC_FOR_BETA === "true";
+      if (!bypassKyc) {
+        const kycSnap = await db
+          .collection("kyc_submissions")
+          .doc(user.uid)
+          .get();
+        const kycStatus = kycSnap.exists
+          ? (kycSnap.data()?.status as string | undefined)
+          : undefined;
+        if (kycStatus !== "approved") {
+          throw new HttpError(
+            403,
+            "Publisher access requires approved KYC. Submit KYC and wait for review."
+          );
+        }
       }
 
       // P0 — room name MUST belong to this user. Reject squatting/impersonation.
