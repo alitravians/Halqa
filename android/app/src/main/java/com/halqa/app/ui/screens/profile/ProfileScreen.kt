@@ -30,6 +30,10 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,19 +43,48 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.halqa.app.data.AuthRepository
+import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.MockData
+import com.halqa.app.data.UserRepository
 import com.halqa.app.ui.components.BadgePill
 import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
+import kotlinx.coroutines.launch
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(navController: NavController) {
-    val user = MockData.currentUser
+    val firebaseUser by FirebaseAuthRepository.authStateFlow().collectAsState(initial = FirebaseAuthRepository.currentUser)
+    val uid = firebaseUser?.uid
+    val liveProfile = if (uid != null) {
+        UserRepository.observeProfile(uid).collectAsStateWithLifecycle(initialValue = null).value
+    } else {
+        null
+    }
+    val scope = rememberCoroutineScope()
+
+    val displayName = liveProfile?.displayName?.takeIf { it.isNotBlank() }
+        ?: firebaseUser?.displayName
+        ?: firebaseUser?.email?.substringBefore('@')
+        ?: "زائر"
+    val handle = liveProfile?.handle?.takeIf { it.isNotBlank() }
+        ?.let { "@$it" }
+        ?: firebaseUser?.email?.let { "@${it.substringBefore('@')}" }
+        ?: ""
+    val bio = liveProfile?.bio?.takeIf { it.isNotBlank() }
+        ?: "أكمل ملفك من \"تعديل الملف\" لتظهر نبذتك هنا."
+
+    val user = MockData.currentUser.copy(
+        displayName = displayName,
+        handle = handle,
+        bio = bio,
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -118,7 +151,7 @@ fun ProfileScreen(navController: NavController) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GhostButton(
                     text = "تعديل الملف",
-                    onClick = { /* edit */ },
+                    onClick = { navController.navigate(Routes.EditProfile) },
                     fillMaxWidth = false,
                     modifier = Modifier.weight(1f),
                 )
@@ -145,10 +178,10 @@ fun ProfileScreen(navController: NavController) {
             Spacer(Modifier.height(24.dp))
             SectionTitle("الإعدادات")
             MenuRow(Icons.Filled.AccountBalanceWallet, "محفظة الكوينز والأرباح") { navController.navigate(Routes.Wallet) }
-            MenuRow(Icons.Filled.History, "سجل البث والمعارك") {}
+            MenuRow(Icons.Filled.History, "سجل البث والمعارك") { navController.navigate(Routes.StreamHistory) }
             MenuRow(Icons.Filled.Star, "تطوير الـ Avatar") { navController.navigate(Routes.PkArena) }
-            MenuRow(Icons.Filled.Shield, "التحقق من الهوية (KYC)") {}
-            MenuRow(Icons.Filled.SettingsSuggest, "الإعدادات العامة") {}
+            MenuRow(Icons.Filled.Shield, "التحقق من الهوية (KYC)") { navController.navigate(Routes.Kyc) }
+            MenuRow(Icons.Filled.SettingsSuggest, "الإعدادات العامة") { navController.navigate(Routes.Settings) }
 
             Spacer(Modifier.height(20.dp))
             SectionTitle("القانوني")
@@ -157,7 +190,14 @@ fun ProfileScreen(navController: NavController) {
             MenuRow(Icons.Filled.Lock, "إرشادات المجتمع") { navController.navigate(Routes.Community) }
 
             Spacer(Modifier.height(20.dp))
-            MenuRow(Icons.Filled.Logout, "تسجيل الخروج", danger = true) { /* logout */ }
+            MenuRow(Icons.Filled.Logout, "تسجيل الخروج", danger = true) {
+                scope.launch {
+                    AuthRepository.signOut()
+                    navController.navigate(Routes.Auth) {
+                        popUpTo(Routes.Main) { inclusive = true }
+                    }
+                }
+            }
 
             Spacer(Modifier.height(40.dp))
         }

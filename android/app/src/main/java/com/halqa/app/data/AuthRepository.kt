@@ -1,5 +1,6 @@
 package com.halqa.app.data
 
+import com.google.firebase.firestore.FirebaseFirestore
 import com.halqa.app.domain.AuthFailure
 import com.halqa.app.domain.AuthResult
 import com.halqa.app.domain.StaffAccount
@@ -9,21 +10,18 @@ import com.halqa.app.domain.UserRole
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.tasks.await
 
 /**
- * Single source of truth for the authenticated staff session. The repository
- * owns:
+ * Real Firebase-backed staff session.
  *
- *  1. The reactive [currentAccount] StateFlow so any composable can observe
- *     sign-in / sign-out without a singleton-shaped global.
- *  2. Persistence (delegated to [AuthPrefs]) so the session survives cold
- *     starts.
- *  3. An in-memory append-only [auditLog]. In production this will be a
- *     mirror of the server log; for now it lets Phase C/D/E screens be built
- *     against the final shape before the backend lands.
+ *  - Authenticates against Firebase Auth (Email + Password).
+ *  - Looks up the user's role from /users/{uid}.role in Firestore.
+ *  - Caches the resolved [StaffAccount] in [AuthPrefs] so cold-start is instant
+ *    and offline-friendly.
  *
- * Call [bootstrap] exactly once on app start (from `HalqaApplication`) to
- * rehydrate the session from disk.
+ * The MockStaffDirectory has been retired; staff accounts must be provisioned
+ * through the Firebase Console (or the auto-bootstrap on first sign-in below).
  */
 object AuthRepository {
 
@@ -33,7 +31,6 @@ object AuthRepository {
     private val _auditLog = MutableStateFlow<List<StaffAction>>(emptyList())
     val auditLog: StateFlow<List<StaffAction>> = _auditLog.asStateFlow()
 
-    /** Effective role for the current session, defaulting to [UserRole.Guest]. */
     val currentRole: UserRole
         get() = _currentAccount.value?.role ?: UserRole.Guest
 
@@ -42,50 +39,69 @@ object AuthRepository {
     }
 
     /**
-     * Email + password sign-in. Today this checks against [MockStaffDirectory];
-     * the public signature already matches what the backend call will look
-     * like so the call sites do not change when the implementation flips.
+     * Email + password sign-in. The first staff sign-in for a brand-new
+     * deployment auto-creates the Firebase Auth user; subsequent sign-ins
+     * just verify the password.
+     *
+     * Role assignment lives in Firestore at /users/{uid}.role. If the user
+     * has no Firestore record yet, they get role=user — staff/admin roles
+     * must be promoted from the Admin Panel (or via Firestore directly).
      */
     suspend fun signInWithEmail(email: String, password: String): AuthResult {
         val trimmed = email.trim()
         if (trimmed.isBlank() || password.isBlank()) {
             return AuthResult.Failure(AuthFailure.InvalidCredentials)
         }
-        val match = MockStaffDirectory.findByEmail(trimmed)
-            ?: return AuthResult.Failure(AuthFailure.InvalidCredentials)
-        if (match.password != password) {
-            return AuthResult.Failure(AuthFailure.InvalidCredentials)
+        val user = try {
+            FirebaseAuthRepository.signInOrCreateWithEmail(trimmed, password)
+        } catch (t: Throwable) {
+            val msg = t.message.orEmpty().lowercase()
+            val reason = when {
+                "wrong" in msg || "invalid" in msg || "password" in msg -> AuthFailure.InvalidCredentials
+                "disabled" in msg -> AuthFailure.AccountDisabled
+                "network" in msg || "timeout" in msg -> AuthFailure.Network
+                else -> AuthFailure.Unknown
+            }
+            return AuthResult.Failure(reason)
         }
-        adoptSession(match.account)
+        val role = resolveRoleForUid(user.uid, fallbackEmail = trimmed)
+        val account = StaffAccount(
+            id = user.uid,
+            email = user.email ?: trimmed,
+            displayName = (user.displayName ?: trimmed.substringBefore('@'))
+                .ifBlank { trimmed.substringBefore('@') },
+            role = role,
+        )
+        adoptSession(account)
         recordAction(
             type = StaffActionType.SignIn,
             targetId = null,
             notes = "تسجيل دخول من شاشة الموظفين",
         )
-        return AuthResult.Success(match.account)
+        return AuthResult.Success(account)
     }
 
-    fun signOut() {
-        val previous = _currentAccount.value ?: return
-        recordAction(
-            actor = previous,
-            type = StaffActionType.SignOut,
-            targetId = null,
-            notes = "تسجيل خروج",
-        )
+    suspend fun signOut() {
+        val previous = _currentAccount.value
+        if (previous != null) {
+            recordAction(
+                actor = previous,
+                type = StaffActionType.SignOut,
+                targetId = null,
+                notes = "تسجيل خروج",
+            )
+        }
         _currentAccount.value = null
+        _auditLog.value = emptyList()
         AuthPrefs.clearAccount()
+        try {
+            FirebaseAuthRepository.signOut()
+        } catch (_: Throwable) {
+            // Already signed out.
+        }
     }
 
-    /**
-     * Public hook so domain code (Mod queue decisions, Admin role grants, …)
-     * can append to the audit log without re-implementing the bookkeeping.
-     */
-    fun recordAction(
-        type: StaffActionType,
-        targetId: String?,
-        notes: String,
-    ) {
+    fun recordAction(type: StaffActionType, targetId: String?, notes: String) {
         val actor = _currentAccount.value ?: return
         recordAction(actor = actor, type = type, targetId = targetId, notes = notes)
     }
@@ -112,4 +128,41 @@ object AuthRepository {
         _currentAccount.value = account
         AuthPrefs.saveAccount(account)
     }
+
+    /**
+     * Role lookup with a small offline grace policy:
+     *  - Try Firestore /users/{uid}.role first.
+     *  - If that fails (offline first launch), fall back to the well-known
+     *    seed emails so the original mock accounts keep working post-migration.
+     *  - Otherwise default to UserRole.User.
+     */
+    private suspend fun resolveRoleForUid(uid: String, fallbackEmail: String): UserRole {
+        return try {
+            val snap = FirebaseFirestore.getInstance()
+                .collection("users").document(uid).get().await()
+            val role = (snap.getString("role") ?: "user")
+            UserRole.fromKey(role) ?: UserRole.User
+        } catch (_: Throwable) {
+            seedRoleForEmail(fallbackEmail)
+        }
+    }
+
+    private fun seedRoleForEmail(email: String): UserRole = when (email.lowercase()) {
+        "admin@halqa.app" -> UserRole.Admin
+        "staff@halqa.app" -> UserRole.Staff
+        "mod@halqa.app" -> UserRole.Moderator
+        "scout@halqa.app" -> UserRole.Scout
+        else -> UserRole.User
+    }
+}
+
+/** Helper used in this file (and by debug tooling) to map back-end role keys. */
+private fun UserRole.Companion.fromKey(key: String): UserRole? = when (key.lowercase()) {
+    "guest" -> UserRole.Guest
+    "user" -> UserRole.User
+    "scout" -> UserRole.Scout
+    "moderator" -> UserRole.Moderator
+    "staff" -> UserRole.Staff
+    "admin" -> UserRole.Admin
+    else -> null
 }

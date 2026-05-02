@@ -28,6 +28,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +73,7 @@ private fun StaffHomeContent(navController: NavController) {
     val account by AuthRepository.currentAccount.collectAsState()
     val auditLog by AuthRepository.auditLog.collectAsState()
     val signedIn = account ?: return
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -97,9 +100,11 @@ private fun StaffHomeContent(navController: NavController) {
             )
             IconButton(
                 onClick = {
-                    AuthRepository.signOut()
-                    navController.navigate(Routes.Auth) {
-                        popUpTo(Routes.StaffHome) { inclusive = true }
+                    scope.launch {
+                        AuthRepository.signOut()
+                        navController.navigate(Routes.Auth) {
+                            popUpTo(Routes.StaffHome) { inclusive = true }
+                        }
                     }
                 },
             ) {

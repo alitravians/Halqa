@@ -17,9 +17,9 @@ data class StreamPreview(
 )
 
 /**
- * The signed-in user's identity surface (for the Profile screen and any
- * future "who am I" reads). Until we have a real Auth/User repo this is a
- * mock object hosted on [MockData].
+ * The signed-in user's identity surface (consumed by the Profile screen and
+ * other "who am I" reads). Real instances now come from [UserRepository] via
+ * Firebase Auth + Firestore — this data class is the in-memory shape only.
  */
 data class CurrentUser(
     val displayName: String,
@@ -67,81 +67,33 @@ data class PkMode(
     val available: Boolean,
 )
 
+/**
+ * Static catalog content (gifts, coin packages, PK modes). Live, user-generated
+ * data — streams, profiles, audit logs, KYC submissions — is now sourced
+ * exclusively from Firestore + the Halqa backend (no mock fallbacks). Do not
+ * reintroduce mock streams or mock current-user data here.
+ */
 object MockData {
-    val streams: List<StreamPreview> = listOf(
-        StreamPreview(
-            "s1", "حلقة الترفيه المسائية 🎤", "عبدالله الفنان", "abdulla.fnan", 1, 12_400,
-            "ترفيه", "🔥 رائج", 280,
-            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified, BadgeType.TopCreator),
-        ),
-        StreamPreview(
-            "s2", "حلقة دردشة ودية", "نورة الكاتبة", "noura.kateb", 2, 3_240,
-            "دردشة", "💬 دردشة", 320, isPk = true,
-            hostBadges = listOf(BadgeType.KycVerified, BadgeType.FoundingCreator),
-        ),
-        StreamPreview(
-            "s3", "موسيقى وعود مباشر", "خالد العود", "khalid.oud", 3, 8_120,
-            "موسيقى", "🎵 موسيقى", 200,
-            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified),
-        ),
-        StreamPreview(
-            "s4", "ألعاب فيفا — تحدي PK", "فهد جيمر", "fahad.gamer", 4, 5_460,
-            "ألعاب", "🎮 PK", 30, isPk = true,
-            hostBadges = listOf(BadgeType.KycVerified),
-        ),
-        StreamPreview(
-            "s5", "ركن الشعر النبطي", "محمد الشاعر", "m.shaer", 5, 1_180,
-            "ثقافة", "📜 شعر", 250,
-            hostBadges = listOf(BadgeType.FoundingCreator),
-        ),
-        StreamPreview(
-            "s6", "قهوة الصباح ☕", "ريم الخبيرة", "reem.k", 6, 940,
-            "صباح", "☕ صباح", 350,
-            hostBadges = listOf(BadgeType.Staff),
-        ),
-        StreamPreview(
-            "s7", "تعلم الإنجليزية مباشر", "د.هند", "dr.hind", 7, 2_330,
-            "تعليم", "🎓 تعليم", 180,
-            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.KycVerified),
-        ),
-        StreamPreview(
-            "s8", "حلقة طبخ خليجي", "أم سارة", "om.sara", 8, 4_120,
-            "طبخ", "👩‍🍳 طبخ", 20,
-            hostBadges = listOf(BadgeType.KycVerified, BadgeType.FoundingCreator),
-        ),
-        StreamPreview(
-            "s9", "تحدي الرياضيات السريع", "علي العالم", "ali.alalim", 9, 760,
-            "تعليم", "🧠 تحدي", 220,
-        ),
-        StreamPreview(
-            "s10", "كاريوكي عربي PK", "سارة المغنية", "sara.sing", 10, 9_870,
-            "موسيقى", "🎤 PK", 300, isPk = true,
-            hostBadges = listOf(BadgeType.VerifiedAgency, BadgeType.TopCreator),
-        ),
-        StreamPreview(
-            "s11", "حلقة استشارات تقنية", "م. يزيد", "yazeed.dev", 11, 480,
-            "تقنية", "💻 تقنية", 210,
-            hostBadges = listOf(BadgeType.Moderator, BadgeType.KycVerified),
-        ),
-        StreamPreview(
-            "s12", "بث عائلي عام", "بيت الذكريات", "byt.zik", 12, 1_640,
-            "عائلي", "👨‍👩‍👧 عائلي", 340,
-        ),
-    )
+    /**
+     * Empty by design: the live feed is sourced from
+     * [com.halqa.app.data.StreamsRepository.liveStreams] (Firestore) so the
+     * UI shows whatever real broadcasters are publishing right now.
+     */
+    val streams: List<StreamPreview> = emptyList()
 
+    /**
+     * Empty default for cold-start renders before Firebase Auth + Firestore
+     * resolve. Real values come from [com.halqa.app.data.UserRepository.observeProfile].
+     */
     val currentUser: CurrentUser = CurrentUser(
-        displayName = "علي",
-        handle = "@ali_traveler",
-        bio = "حلقتك تبدأ هنا 🎤 — أحب البث، السفر، والتقنية.",
-        followers = 12_400,
-        following = 180,
-        level = 14,
-        streamsHosted = 27,
-        badges = listOf(
-            BadgeType.VerifiedAgency,
-            BadgeType.KycVerified,
-            BadgeType.FoundingCreator,
-        ),
+        displayName = "",
+        handle = "",
+        bio = "",
+        followers = 0,
+        following = 0,
+        level = 1,
+        streamsHosted = 0,
+        badges = emptyList(),
     )
 
     val gifts: List<Gift> = listOf(
@@ -178,16 +130,9 @@ object MockData {
         PkMode("boss", "معركة الزعيم", "حدث يومي تعاوني للمنصة كلها", "🐉", false),
     )
 
-    fun chatMessages(): List<ChatMsg> = listOf(
-        ChatMsg("c1", "سعد", "بث جميل 🔥", isVip = true),
-        ChatMsg("c2", "فاطمة", "❤️❤️"),
-        ChatMsg("c3", "أحمد", "مذيع رهيب"),
-        ChatMsg("c4", "ليلى", "أرسلت لك وردة"),
-        ChatMsg("c5", "خالد", "ابدع كالعادة!", isMod = true),
-        ChatMsg("c6", "نوف", "متابعة جديدة 👋"),
-        ChatMsg("c7", "محمد", "الصوت واضح"),
-        ChatMsg("c8", "ريم", "جاي PK جديد؟", isVip = true),
-        ChatMsg("c9", "عبدالعزيز", "🌹🌹🌹"),
-        ChatMsg("c10", "هند", "صار وقت طويل ما حضرت"),
-    )
+    /**
+     * Empty by design: real chat is delivered through the LiveKit data
+     * channel + Firestore once the stream pipeline is wired end-to-end.
+     */
+    fun chatMessages(): List<ChatMsg> = emptyList()
 }

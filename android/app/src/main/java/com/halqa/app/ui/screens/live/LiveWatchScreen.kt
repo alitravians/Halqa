@@ -53,8 +53,42 @@ import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
 @Composable
+private fun StreamUnavailable(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(HalqaColors.Bg)
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("📡", fontSize = 56.sp)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "البث غير متاح",
+            color = HalqaColors.Text,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "ربما انتهى البث أو لم يبدأ بعد. عُد للقائمة وجرّب لاحقاً.",
+            color = HalqaColors.TextMuted,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(24.dp))
+        androidx.compose.material3.Button(onClick = onBack) {
+            Text("رجوع")
+        }
+    }
+}
+
+@Composable
 fun LiveWatchScreen(streamId: String, navController: NavController) {
-    val stream = MockData.streams.find { it.id == streamId } ?: MockData.streams.first()
+    val stream = MockData.streams.find { it.id == streamId } ?: run {
+        StreamUnavailable(onBack = { navController.popBackStack() })
+        return
+    }
     val messages = MockData.chatMessages()
     var showGifts by remember { mutableStateOf(false) }
 

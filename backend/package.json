@@ -16,6 +16,7 @@
     "@react-three/fiber": "^9.6.1",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
+    "firebase-admin": "^13.8.0",
     "framer-motion": "^12.38.0",
     "livekit-client": "^2.18.8",
     "livekit-server-sdk": "^2.15.2",
