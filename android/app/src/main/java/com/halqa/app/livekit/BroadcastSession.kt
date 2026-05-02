@@ -1,6 +1,7 @@
 package com.halqa.app.livekit
 
 import android.content.Context
+import com.google.firebase.auth.FirebaseAuth
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.LiveKitTokenRequest
 import io.livekit.android.ConnectOptions
@@ -59,6 +60,24 @@ object BroadcastSession {
      */
     fun start(appContext: Context, streamId: String, title: String?) {
         if (isActive) return
+
+        // Defence-in-depth #3 (per Khalid's review): bail out before we
+        // burn a `/api/livekit/token` round-trip if the Firebase session
+        // is missing. This guards against:
+        //   1) User reaching this entry point through a stale UI in a way
+        //      that bypasses GoLivePrepScreen's gate.
+        //   2) Firebase session being revoked between gate check and start
+        //      (token refresh failure, admin revoke, password reset).
+        // Without this, the backend would 401 and the user would see the
+        // generic "تعذّر الاتصال بالبث" instead of an actionable message.
+        if (FirebaseAuth.getInstance().currentUser == null) {
+            _state.value = BroadcastState.Failed(
+                streamId,
+                "يجب تسجيل الدخول قبل بدء البث",
+            )
+            return
+        }
+
         _state.value = BroadcastState.Connecting(streamId)
 
         startJob?.cancel()
