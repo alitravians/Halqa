@@ -45,6 +45,14 @@ fun HalqaVideoRenderer(
         }
     }
 
+    // Release EGL/SurfaceTexture resources when the composable leaves composition.
+    // Without this, every time the renderer recomposes we leak GL resources until GC.
+    DisposableEffect(Unit) {
+        onDispose {
+            renderer.release()
+        }
+    }
+
     AndroidView(
         factory = { renderer },
         modifier = modifier,

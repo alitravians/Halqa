@@ -43,6 +43,7 @@ object BroadcastSession {
 
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
+    private var startJob: Job? = null
 
     val isActive: Boolean
         get() = _state.value is BroadcastState.Connecting || _state.value is BroadcastState.Live
@@ -60,7 +61,8 @@ object BroadcastSession {
         if (isActive) return
         _state.value = BroadcastState.Connecting(streamId)
 
-        scope.launch {
+        startJob?.cancel()
+        startJob = scope.launch {
             try {
                 val tokenResp = withContext(Dispatchers.IO) {
                     ApiClient.api.livekitToken(
@@ -100,6 +102,8 @@ object BroadcastSession {
                     viewerCount = 0,
                     startedAtMillis = System.currentTimeMillis(),
                 )
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // stop() was called while connecting — let stop() own teardown + state.
             } catch (t: Throwable) {
                 cleanupRoom()
                 _state.value = BroadcastState.Failed(streamId, t.message ?: "تعذّر الاتصال بالبث")
@@ -177,6 +181,8 @@ object BroadcastSession {
     }
 
     private fun cleanupRoom() {
+        startJob?.cancel()
+        startJob = null
         eventsJob?.cancel()
         eventsJob = null
         room?.disconnect()
