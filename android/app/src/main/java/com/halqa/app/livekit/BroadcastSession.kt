@@ -46,7 +46,7 @@ object BroadcastSession {
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
     private var startJob: Job? = null
-    private var viewerCountJob: Job? = null
+    private var streamObserveJob: Job? = null
 
     /**
      * The active LiveKit [Room], if any. Exposed read-only so the
@@ -133,16 +133,32 @@ object BroadcastSession {
                     startedAtMillis = System.currentTimeMillis(),
                 )
 
-                // Subscribe to the authoritative server-side viewer count.
-                // Driven by the LiveKit webhook → Firestore pipeline. See
-                // [StreamsRepository.viewerCount] for why we don't use
-                // `room.remoteParticipants.size` here.
-                viewerCountJob?.cancel()
-                viewerCountJob = scope.launch {
-                    StreamsRepository.viewerCount(streamId).collect { count ->
+                // Subscribe to the full server-side stream document. The
+                // SSoT pipe drives:
+                //   - viewer count (LiveKit webhook → Firestore; see
+                //     [StreamsRepository] for why we don't use
+                //     `room.remoteParticipants.size`),
+                //   - remote `status == "ended"` flips (moderator force-end
+                //     from the admin panel, or the publisher's room being
+                //     reaped server-side after `room_finished`). When that
+                //     happens we tear our local Room down even if the
+                //     LiveKit transport-level Disconnected event never
+                //     arrives — the user gets the correct "ended" UI
+                //     immediately and the dangling RTC connection is
+                //     released within one Firestore tick.
+                streamObserveJob?.cancel()
+                streamObserveJob = scope.launch {
+                    StreamsRepository.observe(streamId).collect { snap ->
+                        snap ?: return@collect
                         val cur = _state.value as? BroadcastState.Live ?: return@collect
-                        if (cur.streamId == streamId) {
-                            _state.value = cur.copy(viewerCount = count)
+                        if (cur.streamId != streamId) return@collect
+                        if (snap.isEnded) {
+                            cleanupRoom()
+                            _state.value = BroadcastState.Idle
+                            return@collect
+                        }
+                        if (cur.viewerCount != snap.viewerCount) {
+                            _state.value = cur.copy(viewerCount = snap.viewerCount)
                         }
                     }
                 }
@@ -228,8 +244,8 @@ object BroadcastSession {
         startJob = null
         eventsJob?.cancel()
         eventsJob = null
-        viewerCountJob?.cancel()
-        viewerCountJob = null
+        streamObserveJob?.cancel()
+        streamObserveJob = null
         room?.disconnect()
         room?.release()
         room = null

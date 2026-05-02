@@ -58,6 +58,66 @@ object StreamsRepository {
         awaitClose { reg.remove() }
     }
 
+    /**
+     * Real-time observer for the full `streams/{streamId}` document.
+     *
+     * This is the SSoT pipe used by [BroadcastSession] and [WatchSession]
+     * to react to server-side state transitions:
+     *
+     *   - `status` flips to `"ended"` when a moderator force-ends the
+     *     stream from the admin panel, or when the LiveKit webhook
+     *     receives `room_finished` for a publisher disconnect. The
+     *     broadcast/watch session uses this to tear down its local Room
+     *     and surface the correct UI immediately, without waiting for a
+     *     LiveKit transport-level event that may never arrive.
+     *
+     *   - `giftTotal` accumulates as gifts are sent (M2 — Gift Loop).
+     *     The host's "diamonds raised" overlay reads this directly.
+     *
+     *   - `endTime` is set when the stream ends, used to compute the
+     *     post-stream summary screen.
+     *
+     * Emits null when the document is missing (stream not yet created)
+     * or on a listener error so callers can render a "loading" or
+     * "stream gone" state without crashing.
+     */
+    fun observe(streamId: String): Flow<StreamSnapshot?> = callbackFlow {
+        if (streamId.isBlank()) {
+            trySend(null)
+            awaitClose { }
+            return@callbackFlow
+        }
+        val reg = col().document(streamId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) {
+                trySend(null)
+                return@addSnapshotListener
+            }
+            val docStreamId = snap.getString("streamId") ?: snap.id
+            val ownerUid = snap.getString("ownerUid") ?: return@addSnapshotListener
+            val roomName = snap.getString("roomName") ?: docStreamId
+            val title = snap.getString("title") ?: ""
+            val status = snap.getString("status") ?: "live"
+            val viewerCount = (snap.getLong("viewerCount") ?: 0L).toInt().coerceAtLeast(0)
+            val startTime = snap.getString("startTime")
+            val endTime = snap.getString("endTime")
+            val giftTotal = snap.getLong("giftTotal") ?: 0L
+            trySend(
+                StreamSnapshot(
+                    streamId = docStreamId,
+                    ownerUid = ownerUid,
+                    roomName = roomName,
+                    title = title,
+                    status = status,
+                    viewerCount = viewerCount,
+                    startTime = startTime,
+                    endTime = endTime,
+                    giftTotal = giftTotal,
+                )
+            )
+        }
+        awaitClose { reg.remove() }
+    }
+
     /** Real-time list of `live` streams. Empty if there are none. */
     fun liveStreams(): Flow<List<LiveStreamDto>> = callbackFlow {
         val reg = col()
