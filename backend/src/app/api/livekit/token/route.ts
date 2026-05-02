@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
+import { assertProdSafe, evaluateKycBeta } from "@/lib/kyc-allowlist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,11 @@ const ROOM_NAME_RE = /^[A-Za-z0-9_-]{4,64}$/;
 
 export async function POST(req: NextRequest) {
   try {
+    // Refuse to issue any tokens if a deploy left the unsafe combo
+    // (live monetization + global KYC bypass) on. Better to 500 the
+    // whole route than to silently let strangers broadcast in
+    // production.
+    assertProdSafe();
     const user = await requireUser(req);
     const body = (await req.json()) as Partial<TokenBody>;
 
@@ -57,12 +63,13 @@ export async function POST(req: NextRequest) {
 
     if (role === "publisher") {
       // P0 — only KYC-approved users may broadcast.
-      // Closed-beta override: setting BYPASS_KYC_FOR_BETA=true on Vercel skips
-      // the KYC gate so the team can dogfood broadcasting before the KYC review
-      // tool is wired up. MUST be flipped back to off (or removed) before public
-      // launch — Layla's blocker B2.
-      const bypassKyc = process.env.BYPASS_KYC_FOR_BETA === "true";
-      if (!bypassKyc) {
+      // Beta gating is now allowlist-based (see lib/kyc-allowlist.ts):
+      //   - STATIC_ALLOWLIST (founding team)
+      //   - KYC_BETA_ALLOWLIST env CSV (operator-managed testers)
+      //   - legacy global BYPASS_KYC_FOR_BETA flag (logs a warning on use)
+      // Anyone outside the allowlist still needs an approved KYC submission.
+      const beta = evaluateKycBeta(user.uid);
+      if (!beta.allowed) {
         const kycSnap = await db
           .collection("kyc_submissions")
           .doc(user.uid)
