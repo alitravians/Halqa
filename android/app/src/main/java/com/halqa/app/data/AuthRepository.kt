@@ -55,14 +55,7 @@ object AuthRepository {
         val user = try {
             FirebaseAuthRepository.signInOrCreateWithEmail(trimmed, password)
         } catch (t: Throwable) {
-            val msg = t.message.orEmpty().lowercase()
-            val reason = when {
-                "wrong" in msg || "invalid" in msg || "password" in msg -> AuthFailure.InvalidCredentials
-                "disabled" in msg -> AuthFailure.AccountDisabled
-                "network" in msg || "timeout" in msg -> AuthFailure.Network
-                else -> AuthFailure.Unknown
-            }
-            return AuthResult.Failure(reason)
+            return AuthResult.Failure(mapAuthFailure(t))
         }
         val role = resolveRoleForUid(user.uid, fallbackEmail = trimmed)
         val account = StaffAccount(
@@ -132,16 +125,25 @@ object AuthRepository {
     /**
      * Role lookup with a small offline grace policy:
      *  - Try Firestore /users/{uid}.role first.
-     *  - If that fails (offline first launch), fall back to the well-known
-     *    seed emails so the original mock accounts keep working post-migration.
-     *  - Otherwise default to UserRole.User.
+     *  - If the doc is missing OR has no `role` field, fall back to the
+     *    well-known seed emails (admin@halqa.app etc.) so first-time staff
+     *    sign-in works without manually pre-creating Firestore docs.
+     *  - On Firestore I/O failure, also fall back to seed-by-email.
+     *  - Default: UserRole.User.
      */
     private suspend fun resolveRoleForUid(uid: String, fallbackEmail: String): UserRole {
         return try {
             val snap = FirebaseFirestore.getInstance()
                 .collection("users").document(uid).get().await()
-            val role = (snap.getString("role") ?: "user")
-            UserRole.fromKey(role) ?: UserRole.User
+            val key = snap.getString("role")
+            if (key.isNullOrBlank()) {
+                // No role doc yet — first sign-in. Use the seed map so the
+                // ali-provided staff bootstrap accounts get the correct role
+                // without admin-panel intervention.
+                seedRoleForEmail(fallbackEmail)
+            } else {
+                UserRole.fromKey(key) ?: UserRole.User
+            }
         } catch (_: Throwable) {
             seedRoleForEmail(fallbackEmail)
         }
@@ -153,6 +155,38 @@ object AuthRepository {
         "mod@halqa.app" -> UserRole.Moderator
         "scout@halqa.app" -> UserRole.Scout
         else -> UserRole.User
+    }
+
+    /**
+     * Maps a Firebase Auth (or transport-layer) exception into the small set
+     * of [AuthFailure] reasons the UI knows how to render. Kept exception-type
+     * driven rather than message-string driven — Firebase localises messages
+     * by device locale, so substring matching is fragile.
+     */
+    private fun mapAuthFailure(t: Throwable): AuthFailure {
+        return when (t) {
+            is com.google.firebase.auth.FirebaseAuthInvalidUserException,
+            is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException,
+            is com.google.firebase.auth.FirebaseAuthWeakPasswordException,
+            is com.google.firebase.auth.FirebaseAuthUserCollisionException ->
+                AuthFailure.InvalidCredentials
+            is com.google.firebase.FirebaseNetworkException ->
+                AuthFailure.Network
+            is com.google.firebase.FirebaseTooManyRequestsException ->
+                AuthFailure.Network
+            else -> {
+                // Last-resort string sniff so genuinely opaque Firebase errors
+                // still get a human-readable mapping when we can.
+                val msg = t.message.orEmpty().lowercase()
+                when {
+                    "disabled" in msg -> AuthFailure.AccountDisabled
+                    "network" in msg || "timeout" in msg -> AuthFailure.Network
+                    "wrong" in msg || "password" in msg || "credential" in msg ->
+                        AuthFailure.InvalidCredentials
+                    else -> AuthFailure.Unknown
+                }
+            }
+        }
     }
 }
 

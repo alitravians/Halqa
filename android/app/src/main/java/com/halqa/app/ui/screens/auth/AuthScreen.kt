@@ -10,17 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -82,53 +74,24 @@ fun AuthScreen(navController: NavController) {
             Spacer(Modifier.height(40.dp))
 
             PrimaryButton(
+                text = "المتابعة بالبريد",
+                onClick = { navController.navigate(Routes.EmailAuth) },
+            )
+            Spacer(Modifier.height(12.dp))
+            GhostButton(
                 text = "المتابعة برقم الجوال",
                 onClick = { navController.navigate(Routes.PhoneAuth) },
             )
-            Spacer(Modifier.height(12.dp))
-            GhostButton(
-                text = "المتابعة بـ Google",
-                onClick = { navController.navigate(Routes.Main) { popUpTo(Routes.Auth) { inclusive = true } } },
-            )
-            Spacer(Modifier.height(12.dp))
-            GhostButton(
-                text = "المتابعة بالبريد",
-                onClick = { navController.navigate(Routes.Main) { popUpTo(Routes.Auth) { inclusive = true } } },
-            )
+
+            // Note on omitted entry points (deferred — see PR #13):
+            //  - "المتابعة بـ Google" requires Google Sign-In provider to be
+            //    enabled in Firebase Console + an OAuth client ID baked into
+            //    google-services.json. Re-enable once provisioned.
+            //  - "متابعة كزائر" violates Layla's blocker B1 (anonymous viewers
+            //    cannot bypass age-gate / community guidelines). Removed for
+            //    closed beta; revisit when guest read-only mode is designed.
 
             Spacer(Modifier.height(24.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(1.dp)
-                        .background(HalqaColors.Border),
-                )
-                Text(
-                    "أو",
-                    color = HalqaColors.TextDim,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    fontSize = 13.sp,
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(1.dp)
-                        .background(HalqaColors.Border),
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            TextLinkButton(
-                text = "متابعة كزائر",
-                onClick = { navController.navigate(Routes.Main) { popUpTo(Routes.Auth) { inclusive = true } } },
-                modifier = Modifier.fillMaxWidth(),
-            )
 
             Spacer(Modifier.weight(1f))
 
