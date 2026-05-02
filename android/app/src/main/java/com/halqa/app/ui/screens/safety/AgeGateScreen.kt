@@ -134,8 +134,8 @@ fun AgeGateScreen(navController: NavController) {
         Spacer(Modifier.height(24.dp))
         PrimaryButton(
             text = if (canProceed) "أتعهّد و أكمل" else "أكمل تأكيد التعهّدات",
+            enabled = canProceed,
             onClick = {
-                if (!canProceed) return@PrimaryButton
                 SafetyPrefs.acceptAgeGate()
                 navController.popBackStack()
             },
