@@ -1,5 +1,12 @@
 package com.halqa.app.ui.screens.golive
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,12 +26,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material.icons.filled.ChildCare
+import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.SettingsSuggest
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,15 +48,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
+import com.halqa.app.data.SafetyPrefs
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.components.HalqaTextField
 import com.halqa.app.ui.components.PrimaryButton
+import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
 private val categories = listOf("ترفيه", "موسيقى", "ألعاب", "دردشة", "تعليم", "طبخ", "رياضة", "ثقافة")
@@ -51,6 +70,30 @@ private val categories = listOf("ترفيه", "موسيقى", "ألعاب", "د�
 fun GoLivePrepScreen(navController: NavController) {
     var title by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(categories.first()) }
+    var showWarningDialog by remember { mutableStateOf(false) }
+    var showPermissionRationale by remember { mutableStateOf(false) }
+    var showReadyToStream by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+    // Send the user to the one-time AgeGate the first time they open this screen.
+    LaunchedEffect(Unit) {
+        if (!SafetyPrefs.hasAcceptedAgeGate()) {
+            navController.navigate(Routes.AgeGate)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val cam = result[Manifest.permission.CAMERA] == true
+        val mic = result[Manifest.permission.RECORD_AUDIO] == true
+        if (cam && mic) {
+            showReadyToStream = true
+        } else {
+            showPermissionRationale = true
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -128,6 +171,7 @@ fun GoLivePrepScreen(navController: NavController) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
             Box(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(HalqaColors.BgElevated)
                     .border(1.dp, HalqaColors.Border, RoundedCornerShape(12.dp))
@@ -174,16 +218,150 @@ fun GoLivePrepScreen(navController: NavController) {
 
         Spacer(Modifier.height(20.dp))
 
-        PrimaryButton(text = "ابدأ البث الآن", onClick = { /* navigate to broadcaster */ })
+        // Pre-flight reminder card (shown on every visit per Layla's T&S guidance —
+        // "explicit before each broadcast", complementing the one-time AgeGate).
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(HalqaColors.BgElevated)
+                .border(1.dp, HalqaColors.Warning.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                .padding(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = HalqaColors.Warning, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "تذكير قبل البث",
+                    color = HalqaColors.Text,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            ReminderLine(Icons.Filled.ChildCare, "ممنوع البث لمن هم دون 18 سنة، وممنوع ظهور الأطفال في الكاميرا.")
+            ReminderLine(Icons.Filled.Shield, "النظام يراجع البث تلقائياً، ويوقفه فوراً عند الاشتباه.")
+            ReminderLine(Icons.Filled.Gavel, "تتدرّج العقوبات: تحذير → 24 ساعة → 7 أيام → 30 يوم → دائم.")
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        PrimaryButton(
+            text = "ابدأ البث الآن",
+            onClick = { showWarningDialog = true },
+        )
         Spacer(Modifier.height(12.dp))
         GoldButton(text = "جدولة بث", onClick = { /* schedule */ })
 
         Spacer(Modifier.height(40.dp))
     }
+
+    if (showWarningDialog) {
+        PreStreamWarningDialog(
+            onDismiss = { showWarningDialog = false },
+            onConfirm = {
+                showWarningDialog = false
+                val haveCam = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                val haveMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                if (haveCam && haveMic) {
+                    showReadyToStream = true
+                } else {
+                    permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                }
+            },
+        )
+    }
+
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationale = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionRationale = false
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                }) { Text("فتح الإعدادات", color = HalqaColors.BrandLight) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionRationale = false }) {
+                    Text("لاحقاً", color = HalqaColors.TextMuted)
+                }
+            },
+            title = { Text("نحتاج صلاحيات الكاميرا والميكروفون", color = HalqaColors.Text) },
+            text = {
+                Text(
+                    "البث المباشر يتطلب الوصول للكاميرا والميكروفون. لا نسجّل أي شيء خارج البث، ولا نشاركه مع أي طرف ثالث. افتح الإعدادات لتفعيل الصلاحيتين.",
+                    color = HalqaColors.TextMuted,
+                )
+            },
+            containerColor = HalqaColors.BgElevated,
+        )
+    }
+
+    if (showReadyToStream) {
+        AlertDialog(
+            onDismissRequest = { showReadyToStream = false },
+            confirmButton = {
+                TextButton(onClick = { showReadyToStream = false }) {
+                    Text("تمام", color = HalqaColors.BrandLight)
+                }
+            },
+            title = { Text("جاهز للبث", color = HalqaColors.Text) },
+            text = {
+                Text(
+                    "تم تأكيد التعهّدات وتفعيل الصلاحيات. سيتم تشغيل البث الفعلي عبر LiveKit في المرحلة القادمة من التطوير.",
+                    color = HalqaColors.TextMuted,
+                )
+            },
+            containerColor = HalqaColors.BgElevated,
+        )
+    }
 }
 
 @Composable
-private fun ToggleRow(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun PreStreamWarningDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("أتعهّد و أبدأ البث", color = HalqaColors.BrandLight) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("إلغاء", color = HalqaColors.TextMuted) }
+        },
+        title = { Text("قبل بدء البث", color = HalqaColors.Text) },
+        text = {
+            Column {
+                Text(
+                    "بضغطك على \"أتعهّد و أبدأ البث\" تؤكد:",
+                    color = HalqaColors.TextMuted,
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                ReminderLine(Icons.Filled.ChildCare, "أن عمرك 18 سنة فأكثر.")
+                ReminderLine(Icons.Filled.Shield, "أنه لن يظهر أي قاصر في بثك.")
+                ReminderLine(Icons.Filled.Gavel, "أن النظام قد يفتح مراجعة 10 دقائق ثم يصدر العقوبة.")
+            }
+        },
+        containerColor = HalqaColors.BgElevated,
+    )
+}
+
+@Composable
+private fun ReminderLine(icon: ImageVector, text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 4.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = HalqaColors.Warning, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(text, color = HalqaColors.Text, fontSize = 12.sp, lineHeight = 20.sp)
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, icon: ImageVector) {
     var checked by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,

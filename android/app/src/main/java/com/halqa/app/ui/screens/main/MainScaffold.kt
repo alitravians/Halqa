@@ -93,7 +93,7 @@ fun MainScaffold(rootNavController: NavController) {
                 MainTab.Feed -> FeedScreen(rootNavController)
                 MainTab.Arena -> ArenaTabScreen(rootNavController)
                 MainTab.Live -> GoLivePrepScreen(rootNavController)
-                MainTab.Inbox -> InboxScreen()
+                MainTab.Inbox -> InboxScreen(rootNavController)
                 MainTab.Profile -> ProfileScreen(rootNavController)
             }
         }
