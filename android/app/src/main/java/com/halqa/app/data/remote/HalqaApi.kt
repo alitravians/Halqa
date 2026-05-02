@@ -50,6 +50,18 @@ interface HalqaApi {
 
     @GET("audit/{uid}")
     suspend fun audit(@Path("uid") uid: String): AuditResponse
+
+    @GET("gifts/catalog")
+    suspend fun giftCatalog(): GiftCatalogResponse
+
+    @POST("gifts/send")
+    suspend fun sendGift(@Body body: SendGiftRequest): SendGiftResponse
+
+    @GET("wallet/me")
+    suspend fun getWallet(): WalletDto
+
+    @POST("wallet/topup")
+    suspend fun topupWallet(): TopupResponse
 }
 
 @Serializable
@@ -149,3 +161,60 @@ data class AuditEntryDto(
     val timestamp: String,
     @SerialName("metadata") val metadata: JsonElement? = null,
 )
+
+@Serializable
+data class GiftCatalogResponse(val gifts: List<GiftDto> = emptyList())
+
+@Serializable
+data class GiftDto(
+    val id: String,
+    val name: String,
+    val emoji: String,
+    val priceCoins: Int,
+    val yieldDiamonds: Int,
+    val tier: String = "basic",
+)
+
+@Serializable
+data class SendGiftRequest(
+    val streamId: String,
+    val giftId: String,
+    val count: Int = 1,
+)
+
+@Serializable
+data class SendGiftResponse(
+    val ok: Boolean = false,
+    val txnId: String? = null,
+    val balance: WalletBalanceDto? = null,
+    val gift: GiftEchoDto? = null,
+    val total: GiftTotalDto? = null,
+)
+
+@Serializable
+data class GiftEchoDto(val id: String, val name: String, val emoji: String)
+
+@Serializable
+data class GiftTotalDto(val coins: Int, val diamonds: Int, val count: Int)
+
+@Serializable
+data class WalletDto(
+    val uid: String? = null,
+    val coins: Long = 0L,
+    val diamonds: Long = 0L,
+    val coinsSpent: Long = 0L,
+    val diamondsEarned: Long = 0L,
+)
+
+@Serializable
+data class WalletBalanceDto(val coins: Long = 0L, val diamonds: Long = 0L)
+
+@Serializable
+data class TopupResponse(
+    val ok: Boolean = false,
+    val pack: TopupPackDto? = null,
+    val balance: WalletBalanceDto? = null,
+)
+
+@Serializable
+data class TopupPackDto(val id: String, val coins: Long, val priceLabel: String)
