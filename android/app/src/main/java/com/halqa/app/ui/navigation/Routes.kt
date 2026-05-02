@@ -5,6 +5,8 @@ object Routes {
     const val Onboarding = "onboarding"
     const val Auth = "auth"
     const val PhoneAuth = "phone_auth"
+    const val StaffAuth = "staff_auth"
+    const val StaffHome = "staff_home"
 
     const val Main = "main"
     const val Feed = "feed"
