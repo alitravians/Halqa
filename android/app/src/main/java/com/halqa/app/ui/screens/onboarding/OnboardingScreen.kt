@@ -132,7 +132,11 @@ fun OnboardingScreen(navController: NavController) {
                 )
                 GhostButton(
                     text = "لدي حساب — تسجيل دخول",
-                    onClick = { navController.navigate(Routes.Auth) },
+                    onClick = {
+                        navController.navigate(Routes.Auth) {
+                            popUpTo(Routes.Onboarding) { inclusive = true }
+                        }
+                    },
                 )
             }
         }
