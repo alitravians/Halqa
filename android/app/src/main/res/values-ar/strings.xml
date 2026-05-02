@@ -1,0 +1,55 @@
+<resources>
+    <string name="app_name">حلقة</string>
+    <string name="brand_tagline">حلقتك تبدأ هنا</string>
+
+    <string name="onboarding_title_1">حلقتك تبدأ هنا</string>
+    <string name="onboarding_body_1">انضم لمجتمع البث المباشر العربي الأول. ابثّ، شاهد، وكوّن حلقتك الخاصة.</string>
+    <string name="onboarding_title_2">PK Arena مبتكرة</string>
+    <string name="onboarding_body_2">تنافس مع غيرك في معارك Avatar 3D، ألعاب صغيرة للجمهور، وعجلة عقوبات تحددها أنت.</string>
+    <string name="onboarding_title_3">اربح من جمهورك</string>
+    <string name="onboarding_body_3">استلم الهدايا، اشحن كوينز، واسحب أرباحك بكل أمان.</string>
+
+    <string name="auth_signup">إنشاء حساب</string>
+    <string name="auth_signin">تسجيل دخول</string>
+    <string name="auth_continue_phone">المتابعة برقم الجوال</string>
+    <string name="auth_continue_google">المتابعة بـ Google</string>
+    <string name="auth_or">أو</string>
+    <string name="auth_terms_notice">بإنشائك حساباً، فأنت توافق على شروط الاستخدام وسياسة الخصوصية.</string>
+    <string name="auth_phone_hint">+966 5 ✕ ✕ ✕ ✕ ✕ ✕ ✕ ✕</string>
+
+    <string name="nav_feed">الاستكشاف</string>
+    <string name="nav_arena">الساحة</string>
+    <string name="nav_go_live">بث</string>
+    <string name="nav_inbox">الرسائل</string>
+    <string name="nav_profile">حسابي</string>
+
+    <string name="action_follow">متابعة</string>
+    <string name="action_following">متابَع</string>
+    <string name="action_send_gift">إرسال هدية</string>
+    <string name="action_share">مشاركة</string>
+    <string name="action_join_pk">دخول PK</string>
+    <string name="action_send">إرسال</string>
+    <string name="action_continue">متابعة</string>
+    <string name="action_topup">شحن كوينز</string>
+    <string name="action_withdraw">سحب الأرباح</string>
+
+    <string name="live_viewers_count">%1$s مشاهد</string>
+    <string name="live_chat_hint">اكتب رسالة...</string>
+    <string name="live_top_supporters">أعلى الداعمين</string>
+
+    <string name="wallet_coins">الكوينز</string>
+    <string name="wallet_diamonds">الألماس</string>
+    <string name="wallet_recharge">شحن</string>
+    <string name="wallet_history">السجل</string>
+
+    <string name="arena_title">ساحة Halqa</string>
+    <string name="arena_avatar_battle">معركة Avatar</string>
+    <string name="arena_minigames">ألعاب الجمهور</string>
+    <string name="arena_wheel">عجلة العقوبات</string>
+    <string name="arena_factions">حرب الفصائل</string>
+    <string name="arena_boss_raid">معركة الزعيم</string>
+
+    <string name="profile_followers">المتابعون</string>
+    <string name="profile_following">المتابَعون</string>
+    <string name="profile_received_gifts">الهدايا المستلمة</string>
+</resources>

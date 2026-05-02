@@ -1,0 +1,55 @@
+<resources>
+    <string name="app_name">Halqa</string>
+    <string name="brand_tagline">Where moments gather</string>
+
+    <string name="onboarding_title_1">Your circle starts here</string>
+    <string name="onboarding_body_1">Join the leading Arabic live-streaming community. Stream, watch, and build your circle.</string>
+    <string name="onboarding_title_2">An innovative PK Arena</string>
+    <string name="onboarding_body_2">Battle others in 3D Avatar fights, audience mini-games, and a community-driven penalty wheel.</string>
+    <string name="onboarding_title_3">Earn from your audience</string>
+    <string name="onboarding_body_3">Receive gifts, top up coins, and withdraw earnings safely.</string>
+
+    <string name="auth_signup">Sign up</string>
+    <string name="auth_signin">Sign in</string>
+    <string name="auth_continue_phone">Continue with phone</string>
+    <string name="auth_continue_google">Continue with Google</string>
+    <string name="auth_or">OR</string>
+    <string name="auth_terms_notice">By creating an account you agree to the Terms of Service and Privacy Policy.</string>
+    <string name="auth_phone_hint">+966 5 ✕ ✕ ✕ ✕ ✕ ✕ ✕ ✕</string>
+
+    <string name="nav_feed">Discover</string>
+    <string name="nav_arena">Arena</string>
+    <string name="nav_go_live">Go Live</string>
+    <string name="nav_inbox">Inbox</string>
+    <string name="nav_profile">Profile</string>
+
+    <string name="action_follow">Follow</string>
+    <string name="action_following">Following</string>
+    <string name="action_send_gift">Send gift</string>
+    <string name="action_share">Share</string>
+    <string name="action_join_pk">Join PK</string>
+    <string name="action_send">Send</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_topup">Top up</string>
+    <string name="action_withdraw">Withdraw</string>
+
+    <string name="live_viewers_count">%1$s viewers</string>
+    <string name="live_chat_hint">Write a message…</string>
+    <string name="live_top_supporters">Top supporters</string>
+
+    <string name="wallet_coins">Coins</string>
+    <string name="wallet_diamonds">Diamonds</string>
+    <string name="wallet_recharge">Top up</string>
+    <string name="wallet_history">History</string>
+
+    <string name="arena_title">Halqa Arena</string>
+    <string name="arena_avatar_battle">Avatar Battle</string>
+    <string name="arena_minigames">Audience mini-games</string>
+    <string name="arena_wheel">Penalty wheel</string>
+    <string name="arena_factions">Faction war</string>
+    <string name="arena_boss_raid">Boss raid</string>
+
+    <string name="profile_followers">Followers</string>
+    <string name="profile_following">Following</string>
+    <string name="profile_received_gifts">Received gifts</string>
+</resources>
