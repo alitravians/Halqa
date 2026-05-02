@@ -60,7 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
+import com.google.firebase.auth.FirebaseAuth
 import com.halqa.app.data.SafetyPrefs
+import com.halqa.app.livekit.BroadcastSession
+import com.halqa.app.livekit.LiveBroadcastService
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.components.HalqaTextField
 import com.halqa.app.ui.components.PrimaryButton
@@ -106,13 +109,29 @@ fun GoLivePrepScreen(navController: NavController) {
         return
     }
 
+    fun launchBroadcast() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            showPermissionRationale = true
+            return
+        }
+        val streamId = "u_${uid}_${System.currentTimeMillis()}"
+        BroadcastSession.start(
+            appContext = context.applicationContext,
+            streamId = streamId,
+            title = title.ifBlank { null },
+        )
+        LiveBroadcastService.start(context.applicationContext)
+        navController.navigate(Routes.Broadcasting)
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         val cam = result[Manifest.permission.CAMERA] == true
         val mic = result[Manifest.permission.RECORD_AUDIO] == true
         if (cam && mic) {
-            showReadyToStream = true
+            launchBroadcast()
         } else {
             showPermissionRationale = true
         }
@@ -287,7 +306,7 @@ fun GoLivePrepScreen(navController: NavController) {
                 val haveCam = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
                 val haveMic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 if (haveCam && haveMic) {
-                    showReadyToStream = true
+                    launchBroadcast()
                 } else {
                     permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
                 }

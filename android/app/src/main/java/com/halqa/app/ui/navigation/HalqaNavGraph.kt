@@ -17,6 +17,7 @@ import com.halqa.app.ui.screens.auth.AuthScreen
 import com.halqa.app.ui.screens.auth.PhoneAuthScreen
 import com.halqa.app.ui.screens.auth.StaffSignInScreen
 import com.halqa.app.ui.screens.staff.StaffHomeScreen
+import com.halqa.app.ui.screens.golive.BroadcastingScreen
 import com.halqa.app.ui.screens.live.LiveWatchScreen
 import com.halqa.app.ui.screens.main.MainScaffold
 import com.halqa.app.ui.screens.onboarding.OnboardingScreen
@@ -58,6 +59,8 @@ fun HalqaNavGraph(navController: NavHostController) {
             val id = entry.arguments?.getString("streamId") ?: ""
             LiveWatchScreen(streamId = id, navController = navController)
         }
+
+        composable(Routes.Broadcasting) { BroadcastingScreen(navController) }
 
         composable(Routes.Wallet) { WalletScreen(navController) }
         composable(Routes.TopUp) { TopUpScreen(navController) }

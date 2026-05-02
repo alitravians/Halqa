@@ -44,10 +44,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavController
 import com.halqa.app.data.ChatMsg
 import com.halqa.app.data.Gift
 import com.halqa.app.data.MockData
+import com.halqa.app.livekit.HalqaVideoRenderer
+import com.halqa.app.livekit.WatchSession
+import com.halqa.app.livekit.WatchState
 import com.halqa.app.ui.components.GlassCard
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
@@ -85,12 +91,30 @@ private fun StreamUnavailable(onBack: () -> Unit) {
 
 @Composable
 fun LiveWatchScreen(streamId: String, navController: NavController) {
-    val stream = MockData.streams.find { it.id == streamId } ?: run {
-        StreamUnavailable(onBack = { navController.popBackStack() })
-        return
-    }
-    val messages = MockData.chatMessages()
+    val context = LocalContext.current
+    val state by WatchSession.state.collectAsState()
+    val messages = MockData.chatMessages() // TODO replace with Firestore chat subcollection
     var showGifts by remember { mutableStateOf(false) }
+
+    DisposableEffect(streamId) {
+        WatchSession.start(context.applicationContext, streamId, ownerUid = null)
+        onDispose { WatchSession.stop() }
+    }
+
+    when (val s = state) {
+        is WatchState.Failed -> {
+            StreamUnavailable(onBack = { navController.popBackStack() })
+            return
+        }
+        is WatchState.Ended -> {
+            StreamUnavailable(onBack = { navController.popBackStack() })
+            return
+        }
+        else -> Unit
+    }
+
+    val watching = state as? WatchState.Watching
+    val hostHandle = watching?.ownerUid?.take(8) ?: streamId.take(8)
 
     Box(
         modifier = Modifier
@@ -99,17 +123,21 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             StreamHeader(
-                hostName = stream.hostName,
-                hostBadges = stream.hostBadges,
-                viewers = stream.viewers,
-                category = stream.tag,
+                hostName = hostHandle,
+                hostBadges = emptyList(),
+                viewers = watching?.viewerCount ?: 0,
+                category = "🔴 مباشر",
                 onClose = { navController.popBackStack() },
-                isPk = stream.isPk,
+                isPk = false,
                 onPk = { navController.navigate(Routes.avatarBattle("demo")) },
             )
 
             Box(modifier = Modifier.weight(1f)) {
-                StreamContent(stream.hostName)
+                if (watching != null) {
+                    HalqaVideoRenderer(track = watching.remoteVideo)
+                } else {
+                    StreamConnecting()
+                }
             }
 
             ChatOverlay(messages = messages)
@@ -129,6 +157,22 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                 gifts = MockData.gifts,
                 onDismiss = { showGifts = false },
                 onSend = { showGifts = false },
+            )
+        }
+    }
+}
+
+@Composable
+private fun StreamConnecting() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("⏳", fontSize = 44.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "جارٍ الاتصال بالبث…",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
     }
