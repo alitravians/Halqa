@@ -22,6 +22,9 @@ import com.halqa.app.ui.screens.splash.SplashScreen
 import com.halqa.app.ui.screens.wallet.TopUpScreen
 import com.halqa.app.ui.screens.wallet.WalletScreen
 import com.halqa.app.ui.screens.legal.LegalScreen
+import com.halqa.app.ui.screens.safety.AgeGateScreen
+import com.halqa.app.ui.screens.safety.ReviewResultScreen
+import com.halqa.app.ui.screens.safety.UnderReviewScreen
 
 @Composable
 fun HalqaNavGraph(navController: NavHostController) {
@@ -63,5 +66,9 @@ fun HalqaNavGraph(navController: NavHostController) {
         composable(Routes.Terms) { LegalScreen(kind = "terms", navController = navController) }
         composable(Routes.Privacy) { LegalScreen(kind = "privacy", navController = navController) }
         composable(Routes.Community) { LegalScreen(kind = "community", navController = navController) }
+
+        composable(Routes.AgeGate) { AgeGateScreen(navController) }
+        composable(Routes.UnderReview) { UnderReviewScreen(navController) }
+        composable(Routes.ReviewResult) { ReviewResultScreen(navController) }
     }
 }

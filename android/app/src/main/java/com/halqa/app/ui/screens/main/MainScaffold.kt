@@ -22,7 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,7 +41,7 @@ private enum class MainTab(val label: String) {
 
 @Composable
 fun MainScaffold(rootNavController: NavController) {
-    var current by remember { mutableStateOf(MainTab.Feed) }
+    var current by rememberSaveable { mutableStateOf(MainTab.Feed) }
 
     Scaffold(
         containerColor = HalqaColors.Bg,
@@ -93,7 +93,7 @@ fun MainScaffold(rootNavController: NavController) {
                 MainTab.Feed -> FeedScreen(rootNavController)
                 MainTab.Arena -> ArenaTabScreen(rootNavController)
                 MainTab.Live -> GoLivePrepScreen(rootNavController)
-                MainTab.Inbox -> InboxScreen()
+                MainTab.Inbox -> InboxScreen(rootNavController)
                 MainTab.Profile -> ProfileScreen(rootNavController)
             }
         }

@@ -28,4 +28,9 @@ object Routes {
     const val Terms = "terms"
     const val Privacy = "privacy"
     const val Community = "community"
+
+    // Trust & Safety
+    const val AgeGate = "safety/age_gate"
+    const val UnderReview = "safety/under_review"
+    const val ReviewResult = "safety/review_result"
 }
