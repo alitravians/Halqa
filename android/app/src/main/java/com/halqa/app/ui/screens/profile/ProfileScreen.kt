@@ -92,8 +92,8 @@ fun ProfileScreen(navController: NavController) {
 
             Spacer(Modifier.height(16.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Stat("12.4K", "متابع")
-                Stat("180", "متابع")
+                Stat("12.4K", "المتابعون")
+                Stat("180", "المتابَعون")
                 Stat("LV 14", "المستوى")
                 Stat("🔥 27", "حلقة")
             }

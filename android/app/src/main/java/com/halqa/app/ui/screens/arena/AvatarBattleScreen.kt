@@ -232,7 +232,7 @@ private fun AvatarFighter(name: String, hp: Float, color1: Color, color2: Color,
 @Composable
 private fun ScoreBar(leftScore: Int, rightScore: Int) {
     val total = leftScore + rightScore
-    val leftRatio = leftScore.toFloat() / total
+    val leftRatio = if (total == 0) 0.5f else leftScore.toFloat() / total
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
