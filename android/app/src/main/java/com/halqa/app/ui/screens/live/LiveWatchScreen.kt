@@ -134,7 +134,10 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
 
             Box(modifier = Modifier.weight(1f)) {
                 if (watching != null) {
-                    HalqaVideoRenderer(track = watching.remoteVideo)
+                    HalqaVideoRenderer(
+                        track = watching.remoteVideo,
+                        room = WatchSession.activeRoom,
+                    )
                 } else {
                     StreamConnecting()
                 }

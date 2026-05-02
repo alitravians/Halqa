@@ -2,6 +2,7 @@ package com.halqa.app.livekit
 
 import android.content.Context
 import com.google.firebase.auth.FirebaseAuth
+import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.LiveKitTokenRequest
 import io.livekit.android.ConnectOptions
@@ -45,6 +46,16 @@ object BroadcastSession {
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
     private var startJob: Job? = null
+    private var viewerCountJob: Job? = null
+
+    /**
+     * The active LiveKit [Room], if any. Exposed read-only so the
+     * Compose video renderer can call [Room.initVideoRenderer] on its
+     * `TextureViewRenderer` — without that init step the local preview
+     * stays blank (root cause of "front camera doesn't work" in
+     * v0.1.11). Returns null when the broadcaster is idle.
+     */
+    val activeRoom: Room? get() = room
 
     val isActive: Boolean
         get() = _state.value is BroadcastState.Connecting || _state.value is BroadcastState.Live
@@ -121,6 +132,20 @@ object BroadcastSession {
                     viewerCount = 0,
                     startedAtMillis = System.currentTimeMillis(),
                 )
+
+                // Subscribe to the authoritative server-side viewer count.
+                // Driven by the LiveKit webhook → Firestore pipeline. See
+                // [StreamsRepository.viewerCount] for why we don't use
+                // `room.remoteParticipants.size` here.
+                viewerCountJob?.cancel()
+                viewerCountJob = scope.launch {
+                    StreamsRepository.viewerCount(streamId).collect { count ->
+                        val cur = _state.value as? BroadcastState.Live ?: return@collect
+                        if (cur.streamId == streamId) {
+                            _state.value = cur.copy(viewerCount = count)
+                        }
+                    }
+                }
             } catch (_: kotlinx.coroutines.CancellationException) {
                 // stop() was called while connecting — let stop() own teardown + state.
             } catch (t: Throwable) {
@@ -183,12 +208,11 @@ object BroadcastSession {
 
     private fun onRoomEvent(event: RoomEvent) {
         when (event) {
-            is RoomEvent.ParticipantConnected,
-            is RoomEvent.ParticipantDisconnected -> {
-                val current = _state.value as? BroadcastState.Live ?: return
-                val r = room ?: return
-                _state.value = current.copy(viewerCount = r.remoteParticipants.size)
-            }
+            // Viewer-count updates are driven by Firestore (server-side
+            // webhook), not by LiveKit room events — see comment above
+            // `viewerCountJob`. We intentionally ignore Participant*
+            // events here so a phantom signalling-only ghost can never
+            // inflate the count the broadcaster sees.
             is RoomEvent.Disconnected -> {
                 cleanupRoom()
                 if (_state.value !is BroadcastState.Idle) {
@@ -204,6 +228,8 @@ object BroadcastSession {
         startJob = null
         eventsJob?.cancel()
         eventsJob = null
+        viewerCountJob?.cancel()
+        viewerCountJob = null
         room?.disconnect()
         room?.release()
         room = null
