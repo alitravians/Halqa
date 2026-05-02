@@ -86,7 +86,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.coil.compose)
-    implementation(libs.coil.network)
+    implementation(libs.coil.svg)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

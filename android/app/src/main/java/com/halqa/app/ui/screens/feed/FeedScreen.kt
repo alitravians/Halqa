@@ -49,7 +49,24 @@ import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
-private val categories = listOf("الكل", "ترفيه", "موسيقى", "ألعاب", "دردشة", "تعليم", "طبخ", "رياضة", "PK")
+// Keep this list in sync with the `category` field on every entry in
+// MockData.streams. Anything listed here but missing from MockData yields an
+// empty feed (e.g. previously "رياضة"); anything in MockData but missing here
+// is silently hidden from category-filter results (only "الكل" shows it).
+private val categories = listOf(
+    "الكل",
+    "ترفيه",
+    "موسيقى",
+    "ألعاب",
+    "دردشة",
+    "تعليم",
+    "طبخ",
+    "ثقافة",
+    "صباح",
+    "تقنية",
+    "عائلي",
+    "PK",
+)
 
 @Composable
 fun FeedScreen(navController: NavController) {
