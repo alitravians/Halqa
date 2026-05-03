@@ -39,9 +39,6 @@ interface HalqaApi {
     @POST("kyc/submit")
     suspend fun submitKyc(@Body body: KycSubmitRequest): KycStatusDto
 
-    @GET("streams/live")
-    suspend fun getLiveStreams(): LiveStreamsResponse
-
     @POST("streams/end")
     suspend fun endStream(@Body body: EndStreamRequest): SimpleOk
 
@@ -121,9 +118,6 @@ data class KycSubmitRequest(
     val documentNumber: String,
     val images: List<String>,
 )
-
-@Serializable
-data class LiveStreamsResponse(val streams: List<LiveStreamDto> = emptyList())
 
 @Serializable
 data class LiveStreamDto(
