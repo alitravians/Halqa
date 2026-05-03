@@ -84,11 +84,63 @@ export async function POST(req: NextRequest) {
         // for us to flip to "ended". Refusing to upsert here prevents
         // partial-doc creation that the Android client treats as a
         // broken stream (no ownerUid → WatchSession aborts).
-        await tryWebhookUpdate(ref, {
-          status: "ended",
-          endTime: new Date().toISOString(),
-          viewerCount: 0,
-          lastWebhookAt: new Date().toISOString(),
+        //
+        // Three invariants enforced inside one transaction:
+        //
+        //   1. Idempotency. If the stream is already `status:"ended"`
+        //      (because the publisher hit POST /api/streams/end first
+        //      or because a previous `room_finished` already arrived),
+        //      we MUST NOT overwrite `endTime`. Re-running the update
+        //      from the unconditional path bumped endTime to the
+        //      *webhook* timestamp, which can be 5+ minutes after the
+        //      real publisher-initiated end (LiveKit waits for the
+        //      empty-room timeout before firing room_finished),
+        //      silently corrupting the duration analytics. The check
+        //      below is the same idempotency pattern POST /streams/end
+        //      uses (#32) so the two paths agree on which timestamp wins.
+        //
+        //   2. Audit completeness. Every stream lifecycle end must
+        //      land an `audit_log` entry. The publisher path covers
+        //      itself in /api/streams/end. The webhook-driven path
+        //      (publisher app crashed, lost network, force-quit) had
+        //      NO audit_log entry — Trust & Safety could see a stream
+        //      that started and never ended. We now write one with
+        //      `endedBy: "livekit_room_finished"` so investigators
+        //      can distinguish webhook-completion from user-initiated.
+        //
+        //   3. Partial-doc race. NOT_FOUND from the read still drops
+        //      the event silently (LiveKit beat /livekit/token in a
+        //      cold-start race) — same trade-off as the unconditional
+        //      path used to make.
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists) return;
+          const data = snap.data() ?? {};
+          if (data.status === "ended") {
+            // Already ended (publisher path or earlier webhook).
+            // Just mark observability and return — keep original
+            // endTime intact.
+            tx.update(ref, { lastWebhookAt: new Date().toISOString() });
+            return;
+          }
+          const endTime = new Date().toISOString();
+          tx.update(ref, {
+            status: "ended",
+            endTime,
+            viewerCount: 0,
+            lastWebhookAt: endTime,
+          });
+          const auditRef = db.collection("audit_log").doc();
+          tx.set(auditRef, {
+            userId: data.ownerUid ?? null,
+            action: "stream_end",
+            timestamp: endTime,
+            metadata: {
+              streamId: roomName,
+              endedBy: "livekit_room_finished",
+              startTime: data.startTime ?? null,
+            },
+          });
         });
         break;
       }
