@@ -44,12 +44,24 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="halqa.app" />
-            </intent-filter>
+            <!--
+                NOTE: a dead Android App Links intent-filter for
+                `https://halqa.app` was removed in 2025-11. Halqa has no
+                /.well-known/assetlinks.json deployed, MainActivity does
+                NOT process incoming Intents (no onNewIntent override, no
+                getIntent().data parsing), and no nav route in HalqaApp
+                is reachable through a URL. Re-introducing this filter
+                MUST be paired with:
+                  1. shipping a verified assetlinks.json under
+                     https://halqa.app/.well-known/ (publish via the
+                     halqa-backend Vercel project), AND
+                  2. handling the inbound deep link in MainActivity
+                     (forward intent.data into the Compose nav graph).
+                Until both exist, leaving the filter declared lets any
+                site send users into Halqa for an empty home view, and
+                masks future deep-link bugs behind an "auto-verified"
+                channel that never actually verifies.
+            -->
         </activity>
 
         <!-- LiveKit publisher session keeps camera + microphone active while
