@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
+import { assertNotBanned } from "@/lib/bans";
 import { assertProdSafe, evaluateKycBeta } from "@/lib/kyc-allowlist";
 
 export const runtime = "nodejs";
@@ -51,15 +52,10 @@ export async function POST(req: NextRequest) {
     const db = adminFirestore();
 
     // P0 — gate every request, even viewers, against an active ban.
-    const banSnap = await db
-      .collection("bans")
-      .where("userId", "==", user.uid)
-      .where("active", "==", true)
-      .limit(1)
-      .get();
-    if (!banSnap.empty) {
-      throw new HttpError(403, "Account is banned.");
-    }
+    // Identical query to /lib/bans.ts; routed through the helper so
+    // gifts/send + wallet/topup + this endpoint stay aligned on a
+    // single source of truth.
+    await assertNotBanned(user.uid);
 
     if (role === "publisher") {
       // P0 — only KYC-approved users may broadcast.

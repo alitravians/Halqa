@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
+import { assertNotBanned } from "@/lib/bans";
 import { findGift } from "@/lib/gifts";
 import {
   assertGiftRateOk,
@@ -46,6 +47,12 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const sender = await requireUser(req);
+    // P0 — refuse gifts from a banned account. Until this gate landed,
+    // the bans collection only stopped broadcasting / viewing; a banned
+    // user could keep POSTing /api/gifts/send directly (curl, Postman,
+    // an old Android session that already had a streamId cached) and
+    // continue the very harassment-via-gifting that triggered the ban.
+    await assertNotBanned(sender.uid);
 
     const body = (await req.json().catch(() => ({}))) as {
       streamId?: unknown;
