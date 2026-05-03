@@ -7,9 +7,13 @@ import com.halqa.app.domain.StaffAccount
 import com.halqa.app.domain.StaffAction
 import com.halqa.app.domain.StaffActionType
 import com.halqa.app.domain.UserRole
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -25,6 +29,8 @@ import kotlinx.coroutines.tasks.await
  */
 object AuthRepository {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val _currentAccount = MutableStateFlow<StaffAccount?>(null)
     val currentAccount: StateFlow<StaffAccount?> = _currentAccount.asStateFlow()
 
@@ -34,8 +40,56 @@ object AuthRepository {
     val currentRole: UserRole
         get() = _currentAccount.value?.role ?: UserRole.Guest
 
+    /**
+     * App start hook. Loads the cached [StaffAccount] from prefs synchronously
+     * so the UI does not flicker between Guest → Staff while we re-validate,
+     * then re-validates the role from Firestore in the background.
+     *
+     * The synchronous-cache path is what previously made stale-role attacks
+     * possible. PR #35 closed the email-seed escalation; this method closes
+     * the persistence-of-elevated-role escalation:
+     *
+     *   1. Admin demotes a previously-staff user to "user" via the Admin
+     *      Panel (Firestore /users/{uid}.role = "user").
+     *   2. The user's device still has the old `role: "staff"` cached in
+     *      AuthPrefs from their last sign-in.
+     *   3. They open the app. `RoleGate(check = { it.hasStaffPower })`
+     *      grants the staff UI based on the stale cache. The backend
+     *      still rejects every privileged action (firestore.rules + the
+     *      `isStaff()` checks in `requireUser`), but the staff/admin
+     *      *surface* (audit-log tools, role-gated navigation entries,
+     *      [StaffHomeScreen]) is exposed — information disclosure, same
+     *      class of bug as the seed-map issue PR #35 fixed.
+     *
+     * Re-validation rules:
+     *   - Firebase Auth currentUser is null OR its uid doesn't match the
+     *     cached account → cache is dead (signed out elsewhere, token
+     *     revoked, password reset, account disabled, account swapped) →
+     *     drop it.
+     *   - Firestore `/users/{uid}.role` is missing or differs from the
+     *     cache → adopt the Firestore value (it's authoritative).
+     */
     fun bootstrap() {
-        _currentAccount.value = AuthPrefs.loadAccount()
+        val cached = AuthPrefs.loadAccount()
+        _currentAccount.value = cached
+        if (cached != null) {
+            scope.launch { revalidateCachedAccount(cached) }
+        }
+    }
+
+    private suspend fun revalidateCachedAccount(cached: StaffAccount) {
+        val firebaseUid = FirebaseAuthRepository.currentUser?.uid
+        if (firebaseUid == null || firebaseUid != cached.id) {
+            _currentAccount.value = null
+            AuthPrefs.clearAccount()
+            return
+        }
+        val freshRole = resolveRoleForUid(cached.id)
+        if (freshRole != cached.role) {
+            val updated = cached.copy(role = freshRole)
+            _currentAccount.value = updated
+            AuthPrefs.saveAccount(updated)
+        }
     }
 
     /**
