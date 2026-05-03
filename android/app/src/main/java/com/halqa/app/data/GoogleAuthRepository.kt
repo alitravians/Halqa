@@ -80,13 +80,22 @@ object GoogleAuthRepository {
         val result = FirebaseAuthRepository.auth.signInWithCredential(credential).await()
         val uid = result.user?.uid
             ?: error("Firebase Google sign-in returned null user")
-        UserDocBootstrap.ensureUserDoc(
+        val bootstrapResult = UserDocBootstrap.ensureUserDoc(
             uid = uid,
             phoneNumber = null,
             email = account.email,
             displayName = account.displayName,
             avatar = account.photoUrl?.toString(),
         )
+        // Layla's GR5: same daily signup heartbeat as the Phone OTP path.
+        // Google sign-ins don't carry a phone country code, so the
+        // server buckets them under `unknown` — that's a meaningful
+        // signal in its own right (a sudden burst of unknown-carrier
+        // signups suggests Google flow abuse, separate from the SIM-farm
+        // class of attack the phone breakdown surfaces).
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            SignupTelemetry.heartbeat(phoneCountryCode = null)
+        }
         return uid
     }
 }

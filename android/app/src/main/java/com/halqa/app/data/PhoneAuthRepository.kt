@@ -154,11 +154,36 @@ object PhoneAuthRepository {
         // Bootstrap the /users/{uid} doc BEFORE we return. The screen relies
         // on this contract to avoid the phantom-guest bug — Main must not
         // load until /users/{uid}.role is queryable.
-        UserDocBootstrap.ensureUserDoc(
+        val bootstrapResult = UserDocBootstrap.ensureUserDoc(
             uid = uid,
             phoneNumber = e164PhoneNumber,
             email = null,
         )
+        // Layla's GR5: fire the per-day signup heartbeat ONLY when this
+        // call actually created the user doc. Return sign-ins (Patched /
+        // Skipped) and read failures must not double-count toward the
+        // closed-beta cap. The heartbeat throws SignupCapReachedException
+        // on HTTP 423; the screen catches and refuses to nav to Main.
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            SignupTelemetry.heartbeat(extractCountryCode(e164PhoneNumber))
+        }
         return uid
+    }
+
+    /**
+     * Pull the dial code prefix out of an E.164 number (e.g. `+966501234567`
+     * → `+966`). Returns `null` when the number isn't E.164-shaped, which
+     * makes the server bucket the signup under `unknown` — preferable to
+     * misattributing a malformed number to the wrong carrier.
+     *
+     * Country dial codes are 1–3 digits; we capture up to 3 to keep the
+     * regex bounded. The canonical Saudi prefix is `+966`, the canonical
+     * Egyptian prefix is `+20`, etc. The country picker in
+     * [com.halqa.app.ui.screens.auth.PhoneAuthScreen] always normalises
+     * to this shape before calling [requestVerification].
+     */
+    private fun extractCountryCode(e164: String): String? {
+        val m = Regex("""^(\+\d{1,3})\d+$""").matchEntire(e164.trim())
+        return m?.groupValues?.get(1)
     }
 }

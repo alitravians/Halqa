@@ -55,14 +55,29 @@ object UserDocBootstrap {
      * @param avatar       Profile photo URL from the auth provider
      *                     (Google `photoUrl`), if known. Same seed-only
      *                     semantics as [displayName].
+     * @return a [Result] describing what happened. Callers use this to
+     *         decide whether to fire follow-up first-time-signup hooks
+     *         (e.g. Layla's GR5 daily signup heartbeat) which must run
+     *         only on [Result.Created], never on a return sign-in.
      */
+    enum class Result {
+        /** Doc did not exist; we just created it (first sign-in for this uid). */
+        Created,
+        /** Doc existed and we patched contact / provider fields on it. */
+        Patched,
+        /** Doc existed and was already complete; no write happened. */
+        Skipped,
+        /** Initial read failed. The backend's lazy create path will fill in. */
+        ReadFailed,
+    }
+
     suspend fun ensureUserDoc(
         uid: String,
         phoneNumber: String?,
         email: String?,
         displayName: String? = null,
         avatar: String? = null,
-    ) {
+    ): Result {
         val firestore = FirebaseFirestore.getInstance()
         val ref = firestore.collection("users").document(uid)
         val snap = try {
@@ -72,7 +87,7 @@ object UserDocBootstrap {
             // error), the backend will eventually fill the doc on its
             // first authenticated call. We do NOT want to block sign-in
             // on a transient read.
-            return
+            return Result.ReadFailed
         }
 
         if (snap.exists()) {
@@ -97,15 +112,17 @@ object UserDocBootstrap {
             }
             if (patch.isNotEmpty()) {
                 patch["updatedAt"] = FieldValue.serverTimestamp()
-                try {
+                return try {
                     ref.update(patch).await()
+                    Result.Patched
                 } catch (_: Throwable) {
                     // Patch is best-effort; on rule rejection or transient
                     // error the backend's /api/users/me update path is
                     // authoritative anyway.
+                    Result.Patched
                 }
             }
-            return
+            return Result.Skipped
         }
 
         // First sign-in for this uid. Build the minimal doc the firestore
@@ -159,7 +176,7 @@ object UserDocBootstrap {
             // and let the user proceed; worst case they hit the same
             // phantom-guest path the bug fix was designed to prevent,
             // but only on transient failures rather than every sign-in.
-            return
+            return Result.ReadFailed
         }
 
         // Layla's GR2 (T&S guardrail). Once the user doc is stamped,
@@ -193,5 +210,7 @@ object UserDocBootstrap {
                 // gaps from the user-doc state.
             }
         }
+
+        return Result.Created
     }
 }

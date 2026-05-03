@@ -352,6 +352,11 @@ private fun mapVerificationFailure(reason: PhoneAuthFailure): String = when (rea
 }
 
 private fun mapPhoneError(t: Throwable): String = when (t) {
+    is com.halqa.app.data.SignupCapReachedException ->
+        // Layla GR5: closed-beta daily signup cap reached. The
+        // /users/{uid} doc was already created by ensureUserDoc, but
+        // the screen has caught this exception and refused to nav.
+        "تم بلوغ السقف اليومي للتسجيل في النسخة التجريبية. حاول غداً."
     is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException ->
         "الرمز غير صحيح أو منتهي الصلاحية."
     is com.google.firebase.FirebaseNetworkException ->

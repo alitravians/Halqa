@@ -59,6 +59,24 @@ interface HalqaApi {
 
     @POST("wallet/topup")
     suspend fun topupWallet(): TopupResponse
+
+    /**
+     * Layla's T&S guardrail GR5. Fired exactly once per first-time
+     * sign-in (Phone OTP and Google paths) immediately after
+     * [com.halqa.app.data.UserDocBootstrap] reports
+     * [com.halqa.app.data.UserDocBootstrap.Result.Created]. The backend
+     * increments a daily counter at `/metrics/signups/days/{YYYY-MM-DD}`
+     * and returns HTTP 423 once the closed-beta cap is reached so the
+     * Android client can show "السقف اليومي للتسجيل" + refuse to nav.
+     * The backend route doc explains the fallback rationale (Firestore
+     * rules can't compute the current date so client + route is the
+     * enforcement, per Layla's pre-approved fallback path).
+     *
+     * Body: `{ phoneCountryCode: "+966" | … }` — the canonical dial
+     * code; the route falls back to "unknown" when omitted.
+     */
+    @POST("signup/heartbeat")
+    suspend fun signupHeartbeat(@Body body: SignupHeartbeatRequest): SignupHeartbeatResponse
 }
 
 @Serializable
@@ -202,6 +220,31 @@ data class WalletDto(
 
 @Serializable
 data class WalletBalanceDto(val coins: Long = 0L, val diamonds: Long = 0L)
+
+@Serializable
+data class SignupHeartbeatRequest(
+    /**
+     * E.164 country dial code, e.g. `+966` for Saudi Arabia. The
+     * backend normalises this to a stable Firestore field name and
+     * uses it for the per-day carrier breakdown a staff member sees
+     * on the GR5 admin dashboard. Null / unparseable values are
+     * accepted by the server and bucketed under `unknown`.
+     */
+    val phoneCountryCode: String? = null,
+)
+
+@Serializable
+data class SignupHeartbeatResponse(
+    val ok: Boolean = false,
+    /** Total signups (across all carriers) recorded for today's UTC bucket after this call. */
+    val count: Int = 0,
+    /**
+     * `true` when this signup tipped the day over the closed-beta cap.
+     * The signup itself succeeded; the NEXT signup will be rejected
+     * with HTTP 423 until staff manually unlock or the day rolls.
+     */
+    val locked: Boolean = false,
+)
 
 @Serializable
 data class TopupResponse(
