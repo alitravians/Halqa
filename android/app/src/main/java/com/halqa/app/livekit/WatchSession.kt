@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Singleton viewer session — joins a LiveKit room as subscriber and exposes
@@ -43,6 +44,14 @@ object WatchSession {
     private var streamObserveJob: Job? = null
 
     /**
+     * Generation counter — see [BroadcastSession.sessionGen] for the
+     * full rationale. Bumped on every [start] / [stop]. Ensures a
+     * superseded connect coroutine cannot leak a `Room` into the
+     * shared `room` field after the user has already navigated away.
+     */
+    private val sessionGen = AtomicInteger(0)
+
+    /**
      * The active LiveKit [Room], if any. Exposed read-only so the Compose
      * video renderer can call [Room.initVideoRenderer] before binding the
      * remote video track — required to actually display the stream.
@@ -53,6 +62,7 @@ object WatchSession {
         cleanup()
         _state.value = WatchState.Connecting(streamId)
 
+        val gen = sessionGen.incrementAndGet()
         connectJob = scope.launch {
             try {
                 val tokenResp = withContext(Dispatchers.IO) {
@@ -63,11 +73,18 @@ object WatchSession {
                         )
                     )
                 }
+                if (gen != sessionGen.get()) return@launch
 
                 val newRoom = LiveKit.create(
                     appContext = appContext.applicationContext,
                     options = RoomOptions(adaptiveStream = true),
                 )
+                if (gen != sessionGen.get()) {
+                    // Superseded between LiveKit.create() and connect()
+                    // — release the unconnected Room so we don't leak.
+                    newRoom.release()
+                    return@launch
+                }
                 room = newRoom
 
                 eventsJob?.cancel()
@@ -78,6 +95,15 @@ object WatchSession {
                     token = tokenResp.token,
                     options = ConnectOptions(autoSubscribe = true),
                 )
+                if (gen != sessionGen.get()) {
+                    // Superseded during connect — disconnect & release
+                    // and clear `room` only if it still points at us
+                    // (a newer start() may have already replaced it).
+                    newRoom.disconnect()
+                    newRoom.release()
+                    if (room === newRoom) room = null
+                    return@launch
+                }
 
                 _state.value = WatchState.Watching(
                     streamId = streamId,
@@ -128,6 +154,11 @@ object WatchSession {
     }
 
     fun stop() {
+        // Bump the generation FIRST so any in-flight connect coroutine
+        // (paused at the token RTT or the LiveKit connect handshake)
+        // sees a stale snapshot at its next supersede check and bails
+        // out without ever flipping state to Watching.
+        sessionGen.incrementAndGet()
         cleanup()
         _state.value = WatchState.Idle
     }
