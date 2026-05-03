@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "404176183663-sddv8au6suc6f4ja5ilvkq355d2deona.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.halqa.app",
+            "certificate_hash": "e603a9810a6fe0a2b8e56862209d9598a4d9b038"
+          }
+        },
+        {
           "client_id": "404176183663-0gfmjl29tpsp006r0a6cb4lq0ms1u2qs.apps.googleusercontent.com",
           "client_type": 3
         }
