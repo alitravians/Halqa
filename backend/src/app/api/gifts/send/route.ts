@@ -97,9 +97,13 @@ export async function POST(req: NextRequest) {
         throw new HttpError(403, "Cannot gift your own stream");
       }
 
-      // Host blocklist check inside the txn — any concurrent block
-      // write rolls our txn back, so the sender cannot win a race.
-      await assertNotBlockedFromGifting(ownerUid, sender.uid);
+      // Host blocklist check inside the txn snapshot. Passing `tx`
+      // here is what actually makes Firestore retry the transaction
+      // when the host writes to their blocklist between our read and
+      // our commit — a plain `.get()` would silently return a stale
+      // snapshot and the gift would land anyway. See
+      // `assertNotBlockedFromGifting` for the contract.
+      await assertNotBlockedFromGifting(ownerUid, sender.uid, tx);
 
       const senderCoins = senderWalletSnap.exists
         ? Number(senderWalletSnap.data()?.coins ?? 0)
