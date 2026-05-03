@@ -12,7 +12,12 @@
           "package_name": "com.halqa.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "404176183663-0gfmjl29tpsp006r0a6cb4lq0ms1u2qs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAP9qm7AV64eq7-U454wUZhCAkcOOd4zMI"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "404176183663-0gfmjl29tpsp006r0a6cb4lq0ms1u2qs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
