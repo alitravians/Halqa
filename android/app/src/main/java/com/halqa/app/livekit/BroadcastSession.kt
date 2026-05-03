@@ -194,16 +194,24 @@ object BroadcastSession {
     }
 
     fun stop() {
-        if (_state.value is BroadcastState.Idle) return
-        _state.value = BroadcastState.Stopping
-
-        // Tell the backend to flip status -> ended (creates audit log entry).
-        val streamId = when (val s = state.value) {
-            is BroadcastState.Live -> s.streamId
-            is BroadcastState.Connecting -> s.streamId
-            is BroadcastState.Failed -> s.streamId
-            else -> null
+        // Snapshot the current state BEFORE we transition to `Stopping`.
+        // The previous code transitioned first and then read `state.value`,
+        // but `Stopping` is a parameter-less object — the `when` always
+        // fell into `else -> null`, so `streamId` was always null and the
+        // backend `streams/end` call (and its audit_log entry) never ran.
+        // Net effect: the stream stayed `status: "live"` in the feed for
+        // the full LiveKit room-empty timeout (~5 min) after the
+        // broadcaster pressed end, and Trust & Safety lost the
+        // `stream_end` audit event entirely.
+        val previous = _state.value
+        if (previous is BroadcastState.Idle) return
+        val streamId = when (previous) {
+            is BroadcastState.Live -> previous.streamId
+            is BroadcastState.Connecting -> previous.streamId
+            is BroadcastState.Failed -> previous.streamId
+            BroadcastState.Idle, BroadcastState.Stopping -> null
         }
+        _state.value = BroadcastState.Stopping
         scope.launch {
             try {
                 if (streamId != null) {
