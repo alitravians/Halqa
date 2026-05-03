@@ -56,10 +56,28 @@ service cloud.firestore {
       // user can update profile fields. role/createdAt/uid stay immutable on
       // the self-update path so a regular user can never tamper with their
       // own privilege markers.
+      //
+      // Layla GR3 — `dob` (ISO date string self-attested in
+      // [DateOfBirthScreen]) and `dob_attested_at` (server timestamp
+      // for the same write) are also immutable once set, so a user
+      // who under-attested at sign-up can't later "promote" themselves
+      // past the broadcaster ≥18 gate by editing the field. The
+      // first-write path is permitted because `resource.data.dob`
+      // doesn't exist yet — `resource.data.get('dob', '') == ''`
+      // returns the default sentinel. Subsequent updates must keep
+      // the field bit-identical or omit it entirely.
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.createdAt == resource.data.createdAt
+        && (
+          !('dob' in resource.data)
+          || request.resource.data.dob == resource.data.dob
+        )
+        && (
+          !('dob_attested_at' in resource.data)
+          || request.resource.data.dob_attested_at == resource.data.dob_attested_at
+        );
 
       // staff can promote/demote OTHER users for moderation tooling, but
       // never themselves (blocks the self-escalation `staff -> admin`

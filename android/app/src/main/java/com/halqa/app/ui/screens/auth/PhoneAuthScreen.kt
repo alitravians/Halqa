@@ -231,7 +231,11 @@ fun PhoneAuthScreen(navController: NavController) {
                                                 e164PhoneNumber = number,
                                             )
                                         }.onSuccess {
-                                            navController.navigate(Routes.Main) {
+                                            // Layla GR3: route through DOB self-
+                                            // attestation. Returning users skip
+                                            // the picker via the screen's own
+                                            // existing-dob LaunchedEffect.
+                                            navController.navigate(Routes.DateOfBirth) {
                                                 popUpTo(Routes.Auth) { inclusive = true }
                                             }
                                         }.onFailure { t ->
@@ -300,7 +304,11 @@ fun PhoneAuthScreen(navController: NavController) {
                                         e164PhoneNumber = e164,
                                     )
                                 }.onSuccess {
-                                    navController.navigate(Routes.Main) {
+                                    // Layla GR3: route through DOB self-
+                                    // attestation. Returning users skip
+                                    // the picker via the screen's own
+                                    // existing-dob LaunchedEffect.
+                                    navController.navigate(Routes.DateOfBirth) {
                                         popUpTo(Routes.Auth) { inclusive = true }
                                     }
                                 }.onFailure { t ->

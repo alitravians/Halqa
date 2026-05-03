@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.SafetyPrefs
 import com.halqa.app.livekit.BroadcastSession
@@ -66,6 +68,9 @@ import com.halqa.app.ui.components.HalqaTextField
 import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
+import kotlinx.coroutines.tasks.await
+import java.util.Calendar
+import java.util.TimeZone
 
 // The pre-broadcast category chip list was deleted along with its `var
 // category` state. The chips were unwired in exactly the same way as the
@@ -124,6 +129,44 @@ fun GoLivePrepScreen(navController: NavController) {
     var showSignInRequired by remember { mutableStateOf(false) }
     var showReadyToStream by remember { mutableStateOf(false) }
 
+    // Layla GR3 — broadcaster ≥18 gate.
+    //
+    // The DOB is attested at sign-in time on the [Routes.DateOfBirth]
+    // screen and stamped onto `/users/{uid}.dob`. We mirror the value
+    // here on screen entry so the synchronous `launchBroadcast()`
+    // closure can decide without a coroutine — fetching inside the
+    // closure would force every "ابدأ البث" tap to spinner-and-wait
+    // even when the value is cached.
+    //
+    // Three states matter:
+    //   - `null`: still loading (or read failed). The button is left
+    //     enabled so the user isn't blocked on a transient Firestore
+    //     hiccup; `launchBroadcast()` will fall through to the legacy
+    //     path. Worst case is the broadcast starts and the backend
+    //     /api/livekit/token + dob backfill catches it server-side.
+    //   - "" (empty string): doc exists but `dob` field is missing.
+    //     This is the grandfathered closed-beta path (signed up under
+    //     v0.1.21 before GR3 shipped). We force them through the DOB
+    //     screen rather than blocking outright so they have a way to
+    //     recover.
+    //   - ISO date: parse and check (today − dob).years >= 18.
+    var attestedDobIso by remember { mutableStateOf<String?>(null) }
+    var dobLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(firebaseUid) {
+        attestedDobIso = runCatching {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(firebaseUid)
+                .get()
+                .await()
+                .getString("dob")
+                .orEmpty()
+        }.getOrNull()
+        dobLoaded = true
+    }
+    var showUnderAgeBlock by remember { mutableStateOf(false) }
+    var showDobMissingBlock by remember { mutableStateOf(false) }
+
     // Re-read the in-memory acceptance flag whenever this screen returns to the
     // foreground (e.g. after the user navigated to AgeGateScreen and came back).
     // We deliberately *do not* auto-`navigate(AgeGate)` from a LaunchedEffect:
@@ -162,6 +205,46 @@ fun GoLivePrepScreen(navController: NavController) {
             showSignInRequired = true
             return
         }
+
+        // Layla GR3 — broadcaster ≥18 gate.
+        //
+        // [attestedDobIso] is hydrated by the LaunchedEffect at the top
+        // of this Composable. The semantics are deliberately
+        // permissive on the "still loading" path so a transient
+        // Firestore stall does not block a known-adult broadcaster
+        // from going live. The hard blocks are:
+        //
+        //  1. Doc loaded but `dob` field is empty/missing → user
+        //     signed up before GR3 shipped (closed-beta v0.1.20/21
+        //     grandfather). Send them through the DOB screen rather
+        //     than letting them broadcast un-attested.
+        //  2. `dob` is set and parses to < 18 years old → hard
+        //     non-dismissible dialog, no path to start the stream.
+        //
+        // We compute `today` in UTC because `dob` is also stored as a
+        // UTC ISO date (see DateOfBirthScreen.persistDob); using a
+        // local-timezone "today" would let a user born today open the
+        // app from a UTC-ahead timezone and pass the gate a few hours
+        // early. We use [Calendar] instead of `java.time` because the
+        // app's `minSdk = 24` lacks the `java.time` runtime without
+        // core-library desugaring.
+        val dobIso = attestedDobIso
+        if (dobLoaded) {
+            if (dobIso.isNullOrBlank()) {
+                showDobMissingBlock = true
+                return
+            }
+            val years = computeAgeYearsFromIsoDob(dobIso)
+            if (years != null && years < 18) {
+                showUnderAgeBlock = true
+                return
+            }
+            // Falls through on `years == null`: the doc has a
+            // malformed `dob` value, which should be impossible
+            // because the writer is our own DateOfBirthScreen.
+            // Server-side gates are the safety net.
+        }
+
         val streamId = "u_${uid}_${System.currentTimeMillis()}"
         BroadcastSession.start(
             appContext = context.applicationContext,
@@ -395,6 +478,61 @@ fun GoLivePrepScreen(navController: NavController) {
             containerColor = HalqaColors.BgElevated,
         )
     }
+
+    // Layla GR3 — under-18 broadcaster block. Non-dismissible by tap-
+    // outside (the only escape is the explicit "حسناً" button) and has
+    // no path to start the broadcast. The age threshold is hard-coded
+    // because changing it must be a deliberate, auditable code change,
+    // not an env var.
+    if (showUnderAgeBlock) {
+        AlertDialog(
+            onDismissRequest = { /* non-dismissible */ },
+            confirmButton = {
+                TextButton(onClick = { showUnderAgeBlock = false }) {
+                    Text("حسناً", color = HalqaColors.BrandLight)
+                }
+            },
+            title = { Text("البث المباشر للبالغين فقط", color = HalqaColors.Text) },
+            text = {
+                Text(
+                    "البث المباشر متاح لمن أعمارهم 18 سنة فأكثر. " +
+                        "يمكنك الاستمرار في تصفح البث ودعم المبدعين بالهدايا.",
+                    color = HalqaColors.TextMuted,
+                )
+            },
+            containerColor = HalqaColors.BgElevated,
+        )
+    }
+
+    // Layla GR3 — grandfathered users (signed up under v0.1.20/21
+    // before this gate shipped) are routed back through the DOB
+    // attestation screen instead of being silently blocked. After
+    // they confirm a DOB, they hit Main and `attestedDobIso` will
+    // be populated on next entry to GoLivePrep.
+    if (showDobMissingBlock) {
+        AlertDialog(
+            onDismissRequest = { showDobMissingBlock = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDobMissingBlock = false
+                    navController.navigate(Routes.DateOfBirth)
+                }) { Text("تأكيد التاريخ", color = HalqaColors.BrandLight) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDobMissingBlock = false }) {
+                    Text("لاحقاً", color = HalqaColors.TextMuted)
+                }
+            },
+            title = { Text("تحقق من العمر مطلوب", color = HalqaColors.Text) },
+            text = {
+                Text(
+                    "نحتاج لتأكيد تاريخ ميلادك قبل البث المباشر. هذه خطوة لمرة واحدة.",
+                    color = HalqaColors.TextMuted,
+                )
+            },
+            containerColor = HalqaColors.BgElevated,
+        )
+    }
 }
 
 @Composable
@@ -555,4 +693,31 @@ private fun SignInRequiredNotice(onSignIn: () -> Unit) {
             fontSize = 12.sp,
         )
     }
+}
+
+/**
+ * Compute the broadcaster's age in completed years from a `dob`
+ * stored as a UTC ISO date string ("YYYY-MM-DD" — the format written
+ * by [DateOfBirthScreen.persistDob]). Returns `null` if the input is
+ * malformed; the caller treats `null` as "fall through to backend
+ * gate" rather than as "block".
+ *
+ * Implemented with [java.util.Calendar] in UTC because the app's
+ * `minSdk = 24` lacks the `java.time` runtime without core-library
+ * desugaring.
+ */
+private fun computeAgeYearsFromIsoDob(iso: String): Int? {
+    val parts = iso.split("-")
+    if (parts.size != 3) return null
+    val y = parts[0].toIntOrNull() ?: return null
+    val m = parts[1].toIntOrNull() ?: return null
+    val d = parts[2].toIntOrNull() ?: return null
+    val today = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+    var years = today.get(Calendar.YEAR) - y
+    val curMonth = today.get(Calendar.MONTH) + 1
+    val curDay = today.get(Calendar.DAY_OF_MONTH)
+    if (curMonth < m || (curMonth == m && curDay < d)) {
+        years -= 1
+    }
+    return years
 }
