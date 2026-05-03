@@ -39,7 +39,53 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
   try {
     decoded = await adminAuth().verifyIdToken(token);
   } catch (err) {
-    throw new HttpError(401, `Invalid ID token: ${(err as Error).message}`);
+    // Map Firebase Admin SDK error codes to stable, safe client
+    // messages. Two reasons this is NOT just `err.message`:
+    //
+    //   1. Information disclosure. Firebase Admin SDK error
+    //      messages contain implementation detail the client
+    //      can't act on and a 401 attacker shouldn't see, e.g.:
+    //
+    //        "Firebase ID token has incorrect 'kid' claim. Maybe
+    //         the public key for the project rotated; check the
+    //         Firebase JWKS endpoint."
+    //        "Decoding Firebase ID token failed. Make sure you
+    //         passed the entire string JWT representing the ID
+    //         token. See https://firebase.google.com/docs/...
+    //         for details on how to retrieve an ID token."
+    //
+    //      Echoing those into `{error: <msg>}` (which `asError`
+    //      does for HttpError verbatim — line ~120) and then to
+    //      the Android client (which shows the body via
+    //      `Throwable.humanize`, see ApiErrors.kt) leaks SDK
+    //      internals + Firebase docs URLs to every 401-er.
+    //
+    //   2. UX. The Android humanize fallback for 401 is a clean
+    //      Arabic string ("انتهت الجلسة. أعد تسجيل الدخول.") but
+    //      it only fires when the body is empty/unparseable. If
+    //      we send the Firebase English message, the user sees
+    //      that English message instead of the localised one.
+    //      Sending a stable English-but-deliberate message keeps
+    //      it forward-compat with backend log search and lets
+    //      the client decide whether to localise.
+    const code = (err as { code?: string }).code;
+    if (code === "auth/id-token-expired") {
+      throw new HttpError(401, "Session expired. Please sign in again.");
+    }
+    if (code === "auth/id-token-revoked" || code === "auth/user-disabled") {
+      throw new HttpError(401, "Session was revoked. Please sign in again.");
+    }
+    if (code === "auth/argument-error") {
+      // Malformed JWT structure (missing segment, bad base64).
+      // Treat as invalid token; do NOT echo the SDK's "Decoding
+      // ... failed. Make sure ..." string.
+      throw new HttpError(401, "Invalid session token.");
+    }
+    // Catch-all for unknown auth/* codes (signature failures,
+    // wrong audience, key rotation issues, etc.). All of those
+    // are the same thing from the user's perspective: the token
+    // they're holding is unusable, sign in again.
+    throw new HttpError(401, "Invalid or expired session token.");
   }
 
   const uid = decoded.uid;
