@@ -7,13 +7,29 @@ export const dynamic = "force-dynamic";
 
 interface KycBody {
   identityType: "national_id" | "passport" | "iqama";
-  /** Up to 3 image references (data URLs or upload IDs). Capped at 256 KB each. */
+  /**
+   * 0–3 image references (data URLs or upload IDs). Capped at 256 KB each.
+   *
+   * The Android client currently sends `[]` because image upload through
+   * Firebase Storage hasn't shipped yet — the KYC screen explicitly tells
+   * the user "the review team will request the images after receiving the
+   * application" (see `KycScreen.kt:217`). Requiring at least one image
+   * here previously made every Android submission fail with HTTP 400, which
+   * silently broke the entire KYC funnel: no gift-spend gating,
+   * broadcasting tier upgrades, or earnings withdrawals could complete
+   * because none of them resolved past the gate.
+   *
+   * When the upload feature ships, tighten the lower bound (and add the
+   * Firebase Storage rules to match) without breaking older clients still
+   * sending `[]`.
+   */
   images: string[];
   fullName: string;
   documentNumber: string;
 }
 
 const MAX_IMG_BYTES = 256 * 1024;
+const MAX_IMG_COUNT = 3;
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,16 +39,17 @@ export async function POST(req: NextRequest) {
     if (!body.identityType || !["national_id", "passport", "iqama"].includes(body.identityType)) {
       throw new HttpError(400, "identityType is required: national_id | passport | iqama.");
     }
-    if (!body.fullName || typeof body.fullName !== "string" || body.fullName.length < 3) {
+    if (!body.fullName || typeof body.fullName !== "string" || body.fullName.trim().length < 3) {
       throw new HttpError(400, "fullName must be at least 3 characters.");
     }
-    if (!body.documentNumber || typeof body.documentNumber !== "string" || body.documentNumber.length < 4) {
+    if (!body.documentNumber || typeof body.documentNumber !== "string" || body.documentNumber.trim().length < 4) {
       throw new HttpError(400, "documentNumber required.");
     }
-    if (!Array.isArray(body.images) || body.images.length < 1 || body.images.length > 3) {
-      throw new HttpError(400, "images must contain 1-3 entries.");
+    const images: string[] = Array.isArray(body.images) ? body.images : [];
+    if (images.length > MAX_IMG_COUNT) {
+      throw new HttpError(400, `images must contain at most ${MAX_IMG_COUNT} entries.`);
     }
-    for (const img of body.images) {
+    for (const img of images) {
       if (typeof img !== "string") throw new HttpError(400, "image must be string.");
       if (img.length > MAX_IMG_BYTES) {
         throw new HttpError(400, `image too large (>${MAX_IMG_BYTES} bytes).`);
@@ -68,7 +85,7 @@ export async function POST(req: NextRequest) {
         identityType: body.identityType,
         fullName: body.fullName!.trim(),
         documentNumber: body.documentNumber!.trim(),
-        images: body.images,
+        images,
         submittedAt: now,
         approvedAt: null,
         reason: null,
