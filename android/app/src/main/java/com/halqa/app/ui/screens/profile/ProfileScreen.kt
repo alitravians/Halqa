@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.History
@@ -32,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,10 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.halqa.app.data.AuthRepository
 import com.halqa.app.data.FirebaseAuthRepository
-import com.halqa.app.data.MockData
 import com.halqa.app.data.UserRepository
-import com.halqa.app.ui.components.BadgePill
-import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.components.avatarInitial
@@ -58,7 +53,6 @@ import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 import kotlinx.coroutines.launch
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(navController: NavController) {
     val firebaseUser by FirebaseAuthRepository.authStateFlow().collectAsState(initial = FirebaseAuthRepository.currentUser)
@@ -81,11 +75,19 @@ fun ProfileScreen(navController: NavController) {
     val bio = liveProfile?.bio?.takeIf { it.isNotBlank() }
         ?: "أكمل ملفك من \"تعديل الملف\" لتظهر نبذتك هنا."
 
-    val user = MockData.currentUser.copy(
-        displayName = displayName,
-        handle = handle,
-        bio = bio,
-    )
+    // Stats (followers, following, level, streamsHosted) and badges
+    // were previously rendered using MockData.currentUser placeholder
+    // values. There is no backend service that tracks any of these
+    // metrics — followers/following = 0, level = 1, streamsHosted = 0,
+    // badges = emptyList() for every user. The Achievement section
+    // rendered 4 hardcoded badges (نجم صاعد, محارب PK, صوت ذهبي,
+    // عاشق الهدايا) unconditionally for every user. All of this was
+    // the same class of UX-lying dead UI removed in PR #65 (dead
+    // category chip), PR #69 (fake topup button), PR #71 (dead
+    // Search/Notifications icons). Removed so the profile screen is
+    // honest. When backend services for followers, levels, and badges
+    // ship, restore via Firestore fields on users/{uid} + a real
+    // UserRepository.observeProfile field + UI consumers here.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -109,44 +111,24 @@ fun ProfileScreen(navController: NavController) {
                         .border(3.dp, HalqaColors.Bg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(avatarInitial(user.displayName), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(avatarInitial(displayName), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.padding(top = 40.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(user.displayName, color = HalqaColors.Text, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(Modifier.size(8.dp))
-                        BadgeRow(badges = user.badges, size = 18.dp, limit = 3)
+                    Text(displayName, color = HalqaColors.Text, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    if (handle.isNotBlank()) {
+                        Text(handle, color = HalqaColors.TextMuted, fontSize = 13.sp)
                     }
-                    Text(user.handle, color = HalqaColors.TextMuted, fontSize = 13.sp)
-                }
-            }
-
-            if (user.badges.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    user.badges.forEach { BadgePill(type = it) }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
             Text(
-                user.bio,
+                bio,
                 color = HalqaColors.Text,
                 fontSize = 14.sp,
                 lineHeight = 22.sp,
             )
-
-            Spacer(Modifier.height(16.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Stat(formatStat(user.followers), "المتابعون")
-                Stat(user.following.toString(), "المتابَعون")
-                Stat("LV ${user.level}", "المستوى")
-                Stat("🔥 ${user.streamsHosted}", "حلقة")
-            }
 
             Spacer(Modifier.height(20.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -162,18 +144,6 @@ fun ProfileScreen(navController: NavController) {
                     fillMaxWidth = false,
                     modifier = Modifier.weight(1f),
                 )
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SectionTitle("لوحة الإنجازات")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Achievement("⭐", "نجم صاعد")
-                Achievement("⚔️", "محارب PK")
-                Achievement("🎤", "صوت ذهبي")
-                Achievement("🎁", "عاشق الهدايا")
             }
 
             Spacer(Modifier.height(24.dp))
@@ -202,38 +172,6 @@ fun ProfileScreen(navController: NavController) {
 
             Spacer(Modifier.height(40.dp))
         }
-    }
-}
-
-private fun formatStat(n: Int): String =
-    when {
-        n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000_000.0).trimEnd('0').trimEnd('.') + "م"
-        n >= 1_000 -> String.format(java.util.Locale.US, "%.1f", n / 1_000.0).trimEnd('0').trimEnd('.') + "ك"
-        else -> "$n"
-    }
-
-@Composable
-private fun Stat(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = HalqaColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = HalqaColors.TextMuted, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun Achievement(emoji: String, label: String) {
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(HalqaColors.BgElevated)
-            .border(1.dp, HalqaColors.Border, RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(emoji, fontSize = 22.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = HalqaColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 
