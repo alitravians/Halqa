@@ -218,14 +218,53 @@ service cloud.firestore {
     }
 
     // -------- /staff_actions/{id} --------
+    // Closed-create. Staff actions (warn / mute / ban / kick) MUST go
+    // through a server-side backend endpoint that uses the Admin SDK,
+    // for the same reason gifts/wallet/streams writes are server-only:
+    //
+    //   1. The previous rule (`allow create: if isStaff() &&
+    //      request.resource.data.staffUid == uid()`) only enforced
+    //      staff identity on `staffUid`. Every other field —
+    //      `targetUid`, `action`, `reason`, length, shape — was
+    //      free-form. A staff member with a tampered SDK client (or
+    //      a leaked staff token) could:
+    //        a. Plant a fake "you were warned for X" entry against any
+    //           targetUid they choose. The read rule (line ~226) lets
+    //           the owner read entries where `resource.data.targetUid
+    //           == uid()`, so a forged entry surfaces to a moderation
+    //           UI or to the user themselves with no audit trail back
+    //           to the real moderator's intent.
+    //        b. Bloat the doc with multi-megabyte strings —
+    //           Firestore's 1MB hard limit, the same doc-bloat DoS
+    //           class closed for streamTitle (PR #54), KYC fullName /
+    //           documentNumber (PR #58), and chat (forthcoming).
+    //        c. Stamp arbitrary timestamps so audit ordering is
+    //           untrustworthy.
+    //   2. There is currently NO producer for this collection. A
+    //      repo-wide grep for `staff_actions` finds matches only in
+    //      this file and `firestore.indexes.json`. No backend route,
+    //      no Android writer. The collection is empty, so closing
+    //      the rule today causes no functional regression.
+    //   3. When the moderator-actions endpoint ships, it must:
+    //        - validate `targetUid` exists in /users,
+    //        - validate `action` against an allow-list ("warn",
+    //          "mute", "ban", "unban", "kick"),
+    //        - hard-cap string fields (`reason`, `notes`),
+    //        - stamp `staffUid` from the auth token (NOT the body),
+    //        - mirror an entry into /audit_log so staff actions land
+    //          in `GET /api/audit/[uid]` alongside kyc / streams /
+    //          gifts / wallet (matches PR #61 + #64 conventions).
+    //
+    // Reads are unchanged: staff sees everything, the targeted user
+    // sees their own entries (so a future "moderation history" screen
+    // can render "you were warned on …"). This stays so we don't have
+    // to rewrite the rule when the endpoint lands.
     match /staff_actions/{actionId} {
       allow read: if isStaff()
         || (isSignedIn() && resource.data.targetUid == uid());
 
-      allow create: if isStaff()
-        && request.resource.data.staffUid == uid();
-
-      allow update: if isAdmin();
+      allow create: if false; // server-only via Admin SDK (TBD)
+      allow update: if false; // server-only via Admin SDK (TBD)
       allow delete: if isAdmin();
     }
 
