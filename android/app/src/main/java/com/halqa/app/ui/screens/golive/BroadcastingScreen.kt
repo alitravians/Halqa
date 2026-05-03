@@ -72,9 +72,33 @@ fun BroadcastingScreen(navController: NavController) {
         .collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(state) {
-        if (state is BroadcastState.Idle) {
-            // Session ended (either by user or remote disconnect) — exit.
-            navController.popBackStack()
+        when (state) {
+            is BroadcastState.Idle -> {
+                // Session ended (either by user or remote disconnect) — exit.
+                navController.popBackStack()
+            }
+            is BroadcastState.Failed -> {
+                // Without this branch the screen rendered the failure
+                // message via CenterMessage and then sat there forever:
+                // there is no End button on the Failed surface (it only
+                // exists on the Live overlay), so the only way out was
+                // the Android system back gesture. Banned users, users
+                // whose KYC was rejected, and users who lost network
+                // mid-token-fetch all hit this and saw what looked like
+                // a frozen app.
+                //
+                // Pause briefly so the user can read the (Arabic-language,
+                // PR #50 humanise()'d) cause, then transition the session
+                // out of Failed via stop() — that goes through the same
+                // Stopping → Idle path the End button takes, and the
+                // Idle handler above pops the back stack. The
+                // LiveBroadcastService self-stops on its own Failed
+                // observation, so we don't need to call its stop()
+                // again here.
+                kotlinx.coroutines.delay(3500)
+                BroadcastSession.stop()
+            }
+            else -> Unit
         }
     }
 
