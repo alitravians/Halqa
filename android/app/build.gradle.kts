@@ -4,7 +4,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.hilt)
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
     alias(libs.plugins.firebase.perf)
@@ -88,10 +87,20 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
-
+    // Hilt removed in v0.1.19 — was wired (@HiltAndroidApp on
+    // HalqaApplication, @AndroidEntryPoint on MainActivity) but 100%
+    // unused (zero @Inject / @Module / @Provides / @HiltViewModel
+    // anywhere in src/main). Re-add only when a real consumer ships;
+    // restoring takes:
+    //   - alias(libs.plugins.hilt) in this file's plugins block
+    //   - alias(libs.plugins.hilt) apply false in android/build.gradle.kts
+    //   - the [versions] / [libraries] / [plugins] entries for hilt +
+    //     hilt-navigation in gradle/libs.versions.toml
+    //   - implementation(libs.hilt.android) + ksp(libs.hilt.compiler)
+    //     + implementation(libs.hilt.navigation.compose) here
+    //   - @HiltAndroidApp on HalqaApplication, @AndroidEntryPoint on
+    //     consuming Activities / Fragments / Services
+    //   - the proguard-rules.pro Hilt block
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)

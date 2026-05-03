@@ -22,10 +22,8 @@ import com.halqa.app.data.SettingsPrefs
 import com.halqa.app.data.UserRepository
 import com.halqa.app.ui.HalqaApp
 import com.halqa.app.ui.theme.HalqaTheme
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.distinctUntilChanged
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
