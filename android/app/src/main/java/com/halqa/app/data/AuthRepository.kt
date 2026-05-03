@@ -93,21 +93,60 @@ object AuthRepository {
     }
 
     /**
-     * Email + password sign-in. The first staff sign-in for a brand-new
-     * deployment auto-creates the Firebase Auth user; subsequent sign-ins
-     * just verify the password.
+     * Regular-user email + password sign-in. The first time a brand-new
+     * email is used, the Firebase Auth user is created and signed in in
+     * the same call (`signInOrCreateWithEmail`). Subsequent calls just
+     * verify the password.
      *
      * Role assignment lives in Firestore at /users/{uid}.role. If the user
      * has no Firestore record yet, they get role=user — staff/admin roles
      * must be promoted from the Admin Panel (or via Firestore directly).
+     *
+     * **Do not call this from the staff sign-in screen.** Use
+     * [signInWithEmailStrict] there — staff accounts must be provisioned
+     * server-side, never auto-created on first attempt.
      */
-    suspend fun signInWithEmail(email: String, password: String): AuthResult {
+    suspend fun signInWithEmail(email: String, password: String): AuthResult =
+        signInWithEmailInternal(email, password, allowAutoCreate = true)
+
+    /**
+     * Strict email + password sign-in. **Refuses to auto-create** the
+     * Firebase Auth user if the email is unknown.
+     *
+     * Used by [com.halqa.app.ui.screens.auth.StaffSignInScreen]. Staff
+     * accounts are provisioned by the admin (Firebase Console + a
+     * `/users/{uid}.role` write). Auto-creating on first attempt would
+     * turn the staff sign-in screen into a public Firebase Auth account
+     * factory: anyone with reach to the screen could spam emails and
+     * inflate the Firebase Auth user count (which has both quota and
+     * billing implications). The privilege-confusion vector itself was
+     * already closed in PR #35 (the seed map is gone), but the abuse
+     * vector around account creation remained until this method existed.
+     *
+     * Returns [AuthFailure.InvalidCredentials] for both "wrong password"
+     * and "no such user" — Firebase already collapses these in its
+     * `INVALID_LOGIN_CREDENTIALS` error to defeat enumeration, and we
+     * mirror that here so the staff screen does not leak which emails
+     * exist in the system.
+     */
+    suspend fun signInWithEmailStrict(email: String, password: String): AuthResult =
+        signInWithEmailInternal(email, password, allowAutoCreate = false)
+
+    private suspend fun signInWithEmailInternal(
+        email: String,
+        password: String,
+        allowAutoCreate: Boolean,
+    ): AuthResult {
         val trimmed = email.trim()
         if (trimmed.isBlank() || password.isBlank()) {
             return AuthResult.Failure(AuthFailure.InvalidCredentials)
         }
         val user = try {
-            FirebaseAuthRepository.signInOrCreateWithEmail(trimmed, password)
+            if (allowAutoCreate) {
+                FirebaseAuthRepository.signInOrCreateWithEmail(trimmed, password)
+            } else {
+                FirebaseAuthRepository.signInWithEmail(trimmed, password)
+            }
         } catch (t: Throwable) {
             return AuthResult.Failure(mapAuthFailure(t))
         }
