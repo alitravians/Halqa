@@ -3,6 +3,10 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
 import { findGift } from "@/lib/gifts";
+import {
+  assertGiftRateOk,
+  assertNotBlockedFromGifting,
+} from "@/lib/gift-rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +66,12 @@ export async function POST(req: NextRequest) {
     const totalCoins = gift.priceCoins * count;
     const totalDiamonds = gift.yieldDiamonds * count;
 
+    // Pre-transaction abuse checks (Mohammed Al-Qahtani — Stream Moderation
+    // Lead). Rate limits + host blocklist run outside the txn because they
+    // read aggregate counts; the small race window (<200ms) is acceptable
+    // for closed-beta scale and avoids inflating the txn surface.
+    await assertGiftRateOk(streamId, sender.uid);
+
     const db = adminFirestore();
     const senderWalletRef = db.collection("wallets").doc(sender.uid);
     const streamRef = db.collection("streams").doc(streamId);
@@ -86,6 +96,10 @@ export async function POST(req: NextRequest) {
       if (ownerUid === sender.uid) {
         throw new HttpError(403, "Cannot gift your own stream");
       }
+
+      // Host blocklist check inside the txn — any concurrent block
+      // write rolls our txn back, so the sender cannot win a race.
+      await assertNotBlockedFromGifting(ownerUid, sender.uid);
 
       const senderCoins = senderWalletSnap.exists
         ? Number(senderWalletSnap.data()?.coins ?? 0)
