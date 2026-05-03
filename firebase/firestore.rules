@@ -82,8 +82,19 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       // -------- /users/{uid}/settings/{doc} (subcollection) --------
+      // Owner reads via the Firestore SDK in real time
+      // ([UserRepository.observeSettings]); writes ALWAYS go through
+      // the backend at POST /api/settings, which validates field
+      // types + enum membership (language ∈ {ar,en}, theme ∈
+      // {light,dark,auto}, etc.) before persisting. If clients were
+      // allowed to write directly they would bypass that validation
+      // and could store junk values that the Android UI then has to
+      // defensively `as? String` around — and a malicious user could
+      // burn quota by writing arbitrary unbounded fields. Closing
+      // both holes by routing every write through the backend.
       match /settings/{settingDoc} {
-        allow read, write: if isOwner(userId);
+        allow read: if isOwner(userId);
+        allow write: if false; // server-only via /api/settings
       }
 
       // -------- /users/{uid}/audit/{id} (per-user audit subcollection) --------
