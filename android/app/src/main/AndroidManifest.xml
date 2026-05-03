@@ -14,7 +14,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!--
+        FOREGROUND_SERVICE_MEDIA_PLAYBACK was previously declared here but
+        no service in this app uses foregroundServiceType="mediaPlayback".
+        The only foreground service is `LiveBroadcastService` which uses
+        camera|microphone (see <service> declaration below). Per Google's
+        2024 FGS-types policy, declaring a foreground-service-type
+        permission without a matching service.foregroundServiceType is
+        flagged at Play Store review and counts as an unused permission.
+        Removed; re-add ONLY when an actual mediaPlayback service is
+        introduced (e.g., a future audio-only listen-back / replay path).
+    -->
+
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
