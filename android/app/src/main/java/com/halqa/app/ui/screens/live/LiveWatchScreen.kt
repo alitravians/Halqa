@@ -346,6 +346,10 @@ private fun StreamContent(hostName: String) {
 
 @Composable
 private fun ChatOverlay(messages: List<ChatMsg>) {
+    // `asReversed()` returns a lightweight reversed *view* of the same
+    // backing list — no allocation per recomposition, unlike `reversed()`
+    // which would copy all 200 messages every time a new chat arrives.
+    val reversedView = remember(messages) { messages.asReversed() }
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
@@ -354,7 +358,15 @@ private fun ChatOverlay(messages: List<ChatMsg>) {
         reverseLayout = true,
         contentPadding = PaddingValues(vertical = 4.dp),
     ) {
-        items(messages.reversed()) { msg ->
+        items(
+            items = reversedView,
+            // Stable doc-id key so LazyColumn can reuse existing item
+            // composables when a new message is prepended; without a key
+            // every chat update re-creates all visible bubbles from
+            // scratch which is the dominant cause of dropped frames on
+            // an active stream.
+            key = { it.id },
+        ) { msg ->
             ChatBubble(msg)
             Spacer(Modifier.height(4.dp))
         }
