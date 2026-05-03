@@ -25,6 +25,23 @@ android {
 
         buildConfigField("String", "API_BASE_URL", "\"https://halqa-backend.vercel.app/api/\"")
         buildConfigField("String", "LIVEKIT_WS_URL", "\"wss://halqa.livekit.cloud\"")
+
+        // Mirrors the backend Vercel env var of the same name. While this is
+        // `true` (closed-beta builds: v0.1.x), every brand-new sign-in is
+        // grandfathered past KYC by the backend (BYPASS_KYC_FOR_BETA=true on
+        // Vercel). The Android client treats that grant as an audit-worthy
+        // event and stamps `bypass_grant` on the freshly created `/users/{uid}`
+        // doc + writes a separate `/audit/{uid}/events/` entry, so when the
+        // bypass flag is eventually flipped off we can:
+        //   1. find every grandfathered user via a server-side query on
+        //      `bypass_grant.will_reverify == true`, and
+        //   2. block their withdrawals until they pass real KYC review
+        //      (see backend/src/app/api/wallet/withdraw/route.ts).
+        // When public launch ships, this constant flips to `false` in the
+        // SAME PR that flips the Vercel env var. Don't flip in isolation.
+        // Source of truth for the runtime flag is the backend; this constant
+        // exists only so the client knows whether to emit the audit fields.
+        buildConfigField("Boolean", "BYPASS_KYC_FOR_BETA", "true")
     }
 
     buildTypes {

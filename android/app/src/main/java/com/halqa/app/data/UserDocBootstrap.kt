@@ -1,5 +1,6 @@
 package com.halqa.app.data
 
+import com.halqa.app.BuildConfig
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -125,6 +126,30 @@ object UserDocBootstrap {
         if (!phoneNumber.isNullOrBlank()) doc["phoneNumber"] = phoneNumber
         if (!email.isNullOrBlank()) doc["email"] = email
 
+        // Layla's GR1 (T&S guardrail). When the backend's beta-bypass
+        // flag is on, every brand-new sign-in is being grandfathered
+        // past full KYC. Stamp that grant durably on the user doc so:
+        //   - staff investigating a wallet incident later can see the
+        //     account was admitted under the beta bypass, not after a
+        //     real document review;
+        //   - the withdrawal endpoint can hard-block any cashout from
+        //     this account until `will_reverify` is cleared by a manual
+        //     re-KYC review (see backend wallet/withdraw route);
+        //   - when the bypass flag is flipped off, a backfill query on
+        //     `bypass_grant.will_reverify == true` enumerates every
+        //     grandfathered user instead of relying on creation-time
+        //     guesses.
+        // The grant block is part of the SAME create call (no second
+        // round-trip) so the doc never exists in a half-stamped state.
+        if (BuildConfig.BYPASS_KYC_FOR_BETA) {
+            doc["bypass_grant"] = mapOf(
+                "reason" to "BETA_M0_PHONE_OTP",
+                "granted_at" to FieldValue.serverTimestamp(),
+                "granted_via" to "BYPASS_KYC_FOR_BETA",
+                "will_reverify" to true,
+            )
+        }
+
         try {
             ref.set(doc).await()
         } catch (_: Throwable) {
@@ -134,6 +159,39 @@ object UserDocBootstrap {
             // and let the user proceed; worst case they hit the same
             // phantom-guest path the bug fix was designed to prevent,
             // but only on transient failures rather than every sign-in.
+            return
+        }
+
+        // Layla's GR2 (T&S guardrail). Once the user doc is stamped,
+        // mirror the same grant into a SEPARATE durable audit trail at
+        // `/audit/{uid}/events/{auto-id}`. The intent is that even if
+        // someone later edits or deletes the user doc, the audit doc
+        // survives in its own collection. Rule: owner can create their
+        // own event with `uid == userId` and `type` is a string; updates
+        // and deletes are forbidden so the trail is append-only.
+        if (BuildConfig.BYPASS_KYC_FOR_BETA) {
+            try {
+                firestore.collection("audit")
+                    .document(uid)
+                    .collection("events")
+                    .add(
+                        mapOf(
+                            "uid" to uid,
+                            "type" to "kyc_bypass_granted",
+                            "granted_at" to FieldValue.serverTimestamp(),
+                            "reason" to "BETA_M0_PHONE_OTP",
+                            "env_flag_value" to true,
+                        ),
+                    )
+                    .await()
+            } catch (_: Throwable) {
+                // Audit write is best-effort. The user doc itself already
+                // carries `bypass_grant`, so the withdrawal hard-block
+                // (Layla GR4) still works even if this secondary write
+                // dropped due to a transient error. The next backend-side
+                // reconciliation job (TBD) is expected to backfill any
+                // gaps from the user-doc state.
+            }
         }
     }
 }
