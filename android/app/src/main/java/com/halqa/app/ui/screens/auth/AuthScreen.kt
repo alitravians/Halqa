@@ -60,7 +60,12 @@ fun AuthScreen(navController: NavController) {
             try {
                 val account = GoogleAuthRepository.accountFromIntent(result.data)
                 GoogleAuthRepository.signInWithIdTokenAndBootstrap(account)
-                navController.navigate(Routes.Main) {
+                // Layla GR3: route through the DOB self-attestation
+                // screen on the way to Main. New users land on the
+                // picker; returning users with `dob` already set hit
+                // the screen's own LaunchedEffect and pass through
+                // immediately (idempotent grandfather path).
+                navController.navigate(Routes.DateOfBirth) {
                     popUpTo(Routes.Auth) { inclusive = true }
                 }
             } catch (e: ApiException) {

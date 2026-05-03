@@ -14,6 +14,7 @@ import androidx.navigation.NavType
 import com.halqa.app.ui.screens.arena.AvatarBattleScreen
 import com.halqa.app.ui.screens.arena.PkArenaScreen
 import com.halqa.app.ui.screens.auth.AuthScreen
+import com.halqa.app.ui.screens.auth.DateOfBirthScreen
 import com.halqa.app.ui.screens.auth.EmailSignInScreen
 import com.halqa.app.ui.screens.auth.PhoneAuthScreen
 import com.halqa.app.ui.screens.auth.StaffSignInScreen
@@ -51,6 +52,12 @@ fun HalqaNavGraph(navController: NavHostController) {
         composable(Routes.PhoneAuth) { PhoneAuthScreen(navController) }
         composable(Routes.StaffAuth) { StaffSignInScreen(navController) }
         composable(Routes.StaffHome) { StaffHomeScreen(navController) }
+
+        // Layla GR3 — DOB self-attestation gate. Reached from Phone OTP
+        // and Google sign-in success flows; users with a `dob` already
+        // on their `/users/{uid}` doc skip past via the screen's own
+        // LaunchedEffect (idempotent grandfather path).
+        composable(Routes.DateOfBirth) { DateOfBirthScreen(navController) }
 
         composable(Routes.Main) { MainScaffold(rootNavController = navController) }
 

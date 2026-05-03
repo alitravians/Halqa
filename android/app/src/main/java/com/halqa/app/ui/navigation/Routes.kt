@@ -9,6 +9,15 @@ object Routes {
     const val StaffAuth = "staff_auth"
     const val StaffHome = "staff_home"
 
+    /**
+     * Layla GR3 — DOB self-attestation screen. Sits between
+     * Phone/Google auth success and [Main]. Users coming from email
+     * staff sign-in skip this (staff don't need DOB attestation),
+     * which is the same reason the route's nav-graph entry is keyed
+     * off the regular-user auth flows only.
+     */
+    const val DateOfBirth = "auth/dob"
+
     const val Main = "main"
     const val Feed = "feed"
     const val Arena = "arena"
