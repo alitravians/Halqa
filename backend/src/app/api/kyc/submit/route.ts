@@ -31,6 +31,20 @@ interface KycBody {
 const MAX_IMG_BYTES = 256 * 1024;
 const MAX_IMG_COUNT = 3;
 
+/**
+ * Hard caps on the user-controlled string fields, so a curl/Postman
+ * caller cannot push the submitted KYC doc toward Firestore's 1MB
+ * hard limit. The Android UI already caps fullName at 80 chars and
+ * documentNumber at 24 chars (KycScreen.kt:211/218), so legitimate
+ * clients are well under these numbers; the server-side caps exist
+ * purely to defeat a tampered/non-Halqa client. Same class as the
+ * streamTitle cap in /api/livekit/token (PR #54). 120 / 64 are picked
+ * to be twice the Android caps so future UI tweaks don't trip us
+ * without a coordinated change.
+ */
+const MAX_FULL_NAME = 120;
+const MAX_DOC_NUMBER = 64;
+
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser(req);
@@ -39,10 +53,25 @@ export async function POST(req: NextRequest) {
     if (!body.identityType || !["national_id", "passport", "iqama"].includes(body.identityType)) {
       throw new HttpError(400, "identityType is required: national_id | passport | iqama.");
     }
-    if (!body.fullName || typeof body.fullName !== "string" || body.fullName.trim().length < 3) {
+    if (!body.fullName || typeof body.fullName !== "string") {
+      throw new HttpError(400, "fullName is required.");
+    }
+    // Reject before trim. A 10MB-of-spaces payload would have its
+    // length check pass after trim (length 0 < 3 → fails) but we'd
+    // still pay the round-trip + the trim() over a giant string.
+    if (body.fullName.length > MAX_FULL_NAME) {
+      throw new HttpError(400, `fullName too long (max ${MAX_FULL_NAME} chars).`);
+    }
+    if (body.fullName.trim().length < 3) {
       throw new HttpError(400, "fullName must be at least 3 characters.");
     }
-    if (!body.documentNumber || typeof body.documentNumber !== "string" || body.documentNumber.trim().length < 4) {
+    if (!body.documentNumber || typeof body.documentNumber !== "string") {
+      throw new HttpError(400, "documentNumber is required.");
+    }
+    if (body.documentNumber.length > MAX_DOC_NUMBER) {
+      throw new HttpError(400, `documentNumber too long (max ${MAX_DOC_NUMBER} chars).`);
+    }
+    if (body.documentNumber.trim().length < 4) {
       throw new HttpError(400, "documentNumber required.");
     }
     const images: string[] = Array.isArray(body.images) ? body.images : [];
