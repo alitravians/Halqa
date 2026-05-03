@@ -45,5 +45,7 @@
 -keep class com.google.firebase.crashlytics.** { *; }
 -keepattributes SourceFile, LineNumberTable
 
-# Hilt
--keep,allowobfuscation,allowshrinking class dagger.hilt.android.lifecycle.HiltViewModel
+# Hilt removed in v0.1.19 — no longer present in deps. If Hilt is
+# re-introduced (see tombstone in app/build.gradle.kts dependencies
+# block), restore:
+#   -keep,allowobfuscation,allowshrinking class dagger.hilt.android.lifecycle.HiltViewModel

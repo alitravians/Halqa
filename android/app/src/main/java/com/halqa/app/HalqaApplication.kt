@@ -6,9 +6,7 @@ import com.halqa.app.data.Analytics
 import com.halqa.app.data.AuthPrefs
 import com.halqa.app.data.AuthRepository
 import com.halqa.app.data.SettingsPrefs
-import dagger.hilt.android.HiltAndroidApp
 
-@HiltAndroidApp
 class HalqaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
