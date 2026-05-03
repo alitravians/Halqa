@@ -41,32 +41,46 @@ export async function POST(req: NextRequest) {
 
     const db = adminFirestore();
     const ref = db.collection("kyc_submissions").doc(user.uid);
-    const existing = await ref.get();
-    if (existing.exists && existing.data()?.status === "approved") {
-      throw new HttpError(409, "KYC already approved.");
-    }
-
     const now = new Date().toISOString();
-    await ref.set(
-      {
+
+    // Atomic check-and-write. The previous code did a non-txn read,
+    // then a separate `set` + `audit_log.add`, opening THREE distinct
+    // race windows:
+    //   1. The "approved" guard could be bypassed by a second submit
+    //      that landed between the first submit's read and write.
+    //   2. The status flip + audit_log write were not atomic, so a
+    //      timeout between them left an unaudited KYC submission.
+    //   3. set({merge:false}) blew away every existing field without
+    //      reading the current state first; an in-flight reviewer
+    //      decision could be erased.
+    // Wrap the read + the write + the audit row in a single txn so
+    // the snapshot used for the "approved" check is the same one the
+    // commit replaces.
+    await db.runTransaction(async (tx) => {
+      const existing = await tx.get(ref);
+      if (existing.exists && existing.data()?.status === "approved") {
+        throw new HttpError(409, "KYC already approved.");
+      }
+
+      tx.set(ref, {
         uid: user.uid,
         status: "pending",
         identityType: body.identityType,
-        fullName: body.fullName.trim(),
-        documentNumber: body.documentNumber.trim(),
+        fullName: body.fullName!.trim(),
+        documentNumber: body.documentNumber!.trim(),
         images: body.images,
         submittedAt: now,
         approvedAt: null,
         reason: null,
-      },
-      { merge: false }
-    );
+      });
 
-    await db.collection("audit_log").add({
-      userId: user.uid,
-      action: "kyc_submit",
-      timestamp: now,
-      metadata: { identityType: body.identityType },
+      const auditRef = db.collection("audit_log").doc();
+      tx.set(auditRef, {
+        userId: user.uid,
+        action: "kyc_submit",
+        timestamp: now,
+        metadata: { identityType: body.identityType },
+      });
     });
 
     return asJson(200, { status: "pending", submittedAt: now });
