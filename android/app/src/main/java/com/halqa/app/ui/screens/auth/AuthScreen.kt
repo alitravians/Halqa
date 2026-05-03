@@ -77,18 +77,31 @@ fun AuthScreen(navController: NavController) {
                 onClick = { navController.navigate(Routes.EmailAuth) },
             )
 
-            // Single auth entry point for closed beta:
-            //  - Phone OTP: removed in M0 — partially-wired Firebase Phone
-            //    flow caused users to land on Main as a phantom guest;
-            //    Layla also flagged it as a KYC blocker for SA carriers.
-            //    Apple Sign-in replaces it in v0.2 once Apple Developer
-            //    membership is provisioned.
-            //  - "المتابعة بـ Google" requires Google Sign-In provider to be
-            //    enabled in Firebase Console + an OAuth client ID baked into
-            //    google-services.json. Re-enable once provisioned.
-            //  - "متابعة كزائر" violates Layla's blocker B1 (anonymous viewers
-            //    cannot bypass age-gate / community guidelines). Removed for
-            //    closed beta; revisit when guest read-only mode is designed.
+            Spacer(Modifier.height(12.dp))
+
+            // Phone OTP re-enabled. The phantom-guest bug that caused this
+            // entry point to be removed in M0 is fixed in
+            // [com.halqa.app.data.UserDocBootstrap]: every Phone-OTP
+            // sign-in now writes /users/{uid} synchronously before the
+            // screen navigates to Main. KYC is still enforced server-side
+            // by broadcast / wallet endpoints; this entry only routes the
+            // user to a regular role:'user' and KYC is requested when
+            // they try to broadcast or top up.
+            PrimaryButton(
+                text = "المتابعة بالهاتف",
+                onClick = { navController.navigate(Routes.PhoneAuth) },
+            )
+
+            // "المتابعة بـ Google" is shipped in a follow-up PR that wires
+            // the GoogleSignInClient + intent flow. It depends on the
+            // Google provider being enabled in Firebase Console and on
+            // google-services.json containing an OAuth Web client
+            // (oauth_client[].client_type == 3); see that PR for the
+            // current blocker status.
+            //
+            // "متابعة كزائر" stays removed: it violates Layla's blocker B1
+            // (anonymous viewers cannot bypass age-gate / community
+            // guidelines). Revisit when guest read-only mode is designed.
 
             Spacer(Modifier.height(24.dp))
 
