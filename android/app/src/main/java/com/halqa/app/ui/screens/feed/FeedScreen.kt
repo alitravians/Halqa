@@ -22,11 +22,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -155,6 +150,18 @@ private fun EmptyFeedState() {
 
 @Composable
 private fun FeedHeader(navController: NavController) {
+    // Search + Notifications top-bar icons were previously rendered here
+    // with empty `onClick = { /* search */ }` and `{ /* notifications */ }`
+    // bodies. There is no SearchScreen, no NotificationsScreen, no
+    // `Routes.Search`, no `Routes.Notifications`, no FCM consumer wired
+    // anywhere in the app. A user tapping either icon got the ripple
+    // effect and absolutely nothing else — a textbook UX-lying control,
+    // same class as PR #65 (dead category chip) and PR #69 (fake topup
+    // button). Removed both. When the search and notifications features
+    // ship, restore the icons in this row, add the routes to
+    // `ui/navigation/Routes.kt`, and wire the onClicks to
+    // `navController.navigate(...)`. Until then the header is a clean
+    // brand bar with just the logo.
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -163,12 +170,6 @@ private fun FeedHeader(navController: NavController) {
     ) {
         HalqaLogo(size = 32, textSize = 18)
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = { /* search */ }) {
-            Icon(Icons.Filled.Search, contentDescription = "Search", tint = HalqaColors.Text)
-        }
-        IconButton(onClick = { /* notifications */ }) {
-            Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = HalqaColors.Text)
-        }
     }
 }
 
