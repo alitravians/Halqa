@@ -48,11 +48,19 @@ object UserDocBootstrap {
      *                     so /api/users/me + observeProfile see it without
      *                     waiting for a backend round-trip.
      * @param email        Email, if known (Google Sign-In path). Same.
+     * @param displayName  Display name from the auth provider (Google),
+     *                     if known. Used to seed the initial doc only —
+     *                     never overwrites a user-edited value.
+     * @param avatar       Profile photo URL from the auth provider
+     *                     (Google `photoUrl`), if known. Same seed-only
+     *                     semantics as [displayName].
      */
     suspend fun ensureUserDoc(
         uid: String,
         phoneNumber: String?,
         email: String?,
+        displayName: String? = null,
+        avatar: String? = null,
     ) {
         val firestore = FirebaseFirestore.getInstance()
         val ref = firestore.collection("users").document(uid)
@@ -67,17 +75,24 @@ object UserDocBootstrap {
         }
 
         if (snap.exists()) {
-            // Doc already exists — patch contact channels only. Never
-            // touch role / createdAt / uid (the rules forbid it on the
-            // self-update path, and we don't want to anyway). Use
-            // `update` with the specific fields we care about; if those
-            // fields were already set, this is effectively a no-op.
+            // Doc already exists — patch contact channels + provider
+            // profile fields ONLY when the existing doc has them blank.
+            // Never touch role / createdAt / uid (the rules forbid it on
+            // the self-update path, and we don't want to anyway). Never
+            // overwrite a user-edited displayName / avatar — once they
+            // pick their own handle / photo we keep it.
             val patch = mutableMapOf<String, Any>()
             if (!phoneNumber.isNullOrBlank() && (snap.getString("phoneNumber").isNullOrBlank())) {
                 patch["phoneNumber"] = phoneNumber
             }
             if (!email.isNullOrBlank() && (snap.getString("email").isNullOrBlank())) {
                 patch["email"] = email
+            }
+            if (!displayName.isNullOrBlank() && (snap.getString("displayName").isNullOrBlank())) {
+                patch["displayName"] = displayName
+            }
+            if (!avatar.isNullOrBlank() && (snap.getString("avatar").isNullOrBlank())) {
+                patch["avatar"] = avatar
             }
             if (patch.isNotEmpty()) {
                 patch["updatedAt"] = FieldValue.serverTimestamp()
@@ -102,10 +117,10 @@ object UserDocBootstrap {
             "role" to "user",
             "createdAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp(),
-            "displayName" to "",
+            "displayName" to (displayName?.trim().orEmpty()),
             "handle" to "",
             "bio" to "",
-            "avatar" to "",
+            "avatar" to (avatar?.trim().orEmpty()),
         )
         if (!phoneNumber.isNullOrBlank()) doc["phoneNumber"] = phoneNumber
         if (!email.isNullOrBlank()) doc["email"] = email
