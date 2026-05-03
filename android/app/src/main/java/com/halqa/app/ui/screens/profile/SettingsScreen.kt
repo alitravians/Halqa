@@ -40,6 +40,7 @@ import androidx.navigation.NavController
 import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.UserRepository
 import com.halqa.app.data.remote.SettingsDto
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.ui.theme.HalqaColors
 import kotlinx.coroutines.launch
 
@@ -75,7 +76,7 @@ fun SettingsScreen(navController: NavController) {
             try {
                 UserRepository.updateSettings(next)
             } catch (t: Throwable) {
-                saveError = "تعذّر مزامنة الإعدادات: ${t.message ?: "خطأ"}"
+                saveError = "تعذّر مزامنة الإعدادات: ${t.humanize()}"
             }
         }
     }

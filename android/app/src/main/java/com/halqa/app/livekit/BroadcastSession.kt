@@ -5,6 +5,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.LiveKitTokenRequest
+import com.halqa.app.data.remote.humanize
 import io.livekit.android.ConnectOptions
 import io.livekit.android.LiveKit
 import io.livekit.android.RoomOptions
@@ -217,7 +218,10 @@ object BroadcastSession {
                 // stop() was called while connecting — let stop() own teardown + state.
             } catch (t: Throwable) {
                 cleanupRoom()
-                _state.value = BroadcastState.Failed(streamId, t.message ?: "تعذّر الاتصال بالبث")
+                _state.value = BroadcastState.Failed(
+                    streamId,
+                    t.humanize(fallback = "تعذّر الاتصال بالبث"),
+                )
             }
         }
     }
