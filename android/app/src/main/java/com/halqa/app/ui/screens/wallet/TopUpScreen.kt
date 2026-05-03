@@ -3,7 +3,6 @@ package com.halqa.app.ui.screens.wallet
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,24 +23,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.halqa.app.data.MockData
+import com.halqa.app.data.remote.ApiClient
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.theme.HalqaColors
+import kotlinx.coroutines.launch
 
 @Composable
 fun TopUpScreen(navController: NavController) {
     var selectedId by remember { mutableStateOf("p4") }
-
-    val pkg = MockData.coinPackages.find { it.id == selectedId } ?: MockData.coinPackages.first()
+    var working by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         Row(
@@ -94,11 +97,24 @@ fun TopUpScreen(navController: NavController) {
 
             Spacer(Modifier.height(20.dp))
 
-            // Per Google Play "Payments" policy (and Layla T&S Blocker B1):
-            // in-app purchases of digital coins on Android MUST go through
-            // Google Play Billing exclusively. STC Pay, Mada, and Visa rails
-            // are intentionally NOT offered here — exposing them would risk
-            // immediate app removal from the Play Store.
+            // Closed-beta payment story:
+            //   - The pack catalogue above (`MockData.coinPackages`) is a
+            //     preview of v0.2's Google Play Billing catalogue — the
+            //     selected pack does NOT determine what the backend
+            //     credits today. The only flow `POST /api/wallet/topup`
+            //     supports right now is the single `BETA_TOPUP_PACK`
+            //     (1000 coins, free, one redemption per 24h).
+            //   - Per Google Play "Payments" policy (and Layla T&S
+            //     Blocker B1): when v0.2 ships paid IAPs, they MUST go
+            //     through Google Play Billing exclusively. STC Pay,
+            //     Mada, and Visa rails are intentionally NOT offered here
+            //     — exposing them would risk immediate app removal from
+            //     the Play Store.
+            //   - Until then this screen is honest about being a beta
+            //     redemption flow, not a payment flow. The previous
+            //     button labelled "ادفع X ر.س عبر Google Play" was a
+            //     UX-lying button — it ran `navController.popBackStack()`
+            //     with zero API calls and zero feedback to the user.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -108,40 +124,64 @@ fun TopUpScreen(navController: NavController) {
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("🟢", fontSize = 22.sp)
+                Text("🎁", fontSize = 22.sp)
                 Spacer(Modifier.size(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Google Play",
+                        "باقة البيتا المجانية",
                         color = HalqaColors.Text,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "الدفع الآمن المعتمد لأجهزة Android",
+                        "الباقات المدفوعة عبر Google Play ستصل في v0.2.",
                         color = HalqaColors.TextMuted,
                         fontSize = 11.sp,
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(HalqaColors.Brand)
-                        .border(2.dp, HalqaColors.Brand, RoundedCornerShape(10.dp)),
-                )
             }
 
             Spacer(Modifier.height(24.dp))
 
             Text(
-                "شحن الكوينز يتم عبر فوترة Google Play. الكوينز رصيد رقمي داخل التطبيق وغير قابلة للاسترجاع بعد الاستخدام.",
+                "خلال فترة البيتا يمكنك الحصول على باقة بداية مجانية مرة كل 24 ساعة. الباقات الأخرى أعلاه للعرض فقط وستصبح قابلة للشراء في v0.2.",
                 color = HalqaColors.TextDim,
                 fontSize = 11.sp,
                 lineHeight = 18.sp,
             )
+            feedback?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = HalqaColors.Pink, fontSize = 13.sp)
+            }
             Spacer(Modifier.height(12.dp))
-            PrimaryButton(text = "ادفع ${pkg.priceSar} ر.س عبر Google Play", onClick = { navController.popBackStack() })
+            PrimaryButton(
+                text = if (working) "جارٍ ..." else "احصل على باقة البيتا (مجاناً)",
+                onClick = {
+                    if (working) return@PrimaryButton
+                    working = true
+                    feedback = null
+                    scope.launch {
+                        try {
+                            val res = ApiClient.api.topupWallet()
+                            working = false
+                            // The Firestore listener on `wallets/{uid}`
+                            // (WalletRepository.observe) will surface the
+                            // new balance to WalletScreen automatically;
+                            // no need to thread the `res.balance` value
+                            // back through navigation state.
+                            val granted = res.pack?.coins ?: 0
+                            feedback = if (res.ok && granted > 0) {
+                                "تم إيداع $granted كوين في محفظتك."
+                            } else {
+                                "تعذّر إتمام العملية."
+                            }
+                        } catch (t: Throwable) {
+                            working = false
+                            feedback = "تعذّر إتمام العملية: ${t.humanize()}"
+                        }
+                    }
+                },
+            )
             Spacer(Modifier.height(20.dp))
         }
     }
