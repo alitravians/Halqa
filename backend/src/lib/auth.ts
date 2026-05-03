@@ -111,11 +111,50 @@ export function asJson(status: number, body: unknown): Response {
   });
 }
 
+/**
+ * Convert any thrown value into the response we send back to the client.
+ *
+ * The contract is:
+ *   - `HttpError` is a value WE programmatically throw with a message
+ *     intended for the client. Forward it verbatim with the chosen
+ *     status code.
+ *   - Anything else is an UNHANDLED failure — Firestore SDK errors,
+ *     code bugs, `assertProdSafe()` config-state errors, etc. The
+ *     message of those almost always contains internal information
+ *     (file paths, env-var names, SDK internals, `RuntimeError: Cannot
+ *     read property 'data' of undefined at /var/task/...`). We MUST
+ *     NOT echo it to the client. Log the full detail server-side
+ *     (Vercel function logs), generate a short request id so callers
+ *     can quote it in support tickets, and return a generic 500 with
+ *     just `{ error: "Internal server error", requestId }`.
+ *
+ * Before this change, `asError` was returning `{ error: err.message }`
+ * for ALL non-HttpError throws. A real example of what that leaked:
+ *   - `assertProdSafe()` failure → "[kyc] BYPASS_KYC_FOR_BETA cannot
+ *     be true when MONETIZATION_MODE=live. …" — tells abusers that
+ *     the closed-beta KYC bypass flag is on a live deploy.
+ *   - Firestore SDK transient → "5 NOT_FOUND: No document to update:
+ *     projects/halqa-prod/databases/(default)/documents/streams/u_…"
+ *     — leaks the project id, document path layout, and the streamId
+ *     namespace shape.
+ *   - JS runtime → "Cannot read properties of undefined (reading
+ *     'displayName') at /var/task/.next/server/app/api/.../route.js:74:18"
+ *     — leaks the Next.js server bundle layout and the line where the
+ *     bug lives, which is a foothold for further probing.
+ */
 export function asError(err: unknown): Response {
   if (err instanceof HttpError) {
     return asJson(err.status, { error: err.message });
   }
-  console.error("Unhandled error:", err);
-  const msg = err instanceof Error ? err.message : "Internal server error";
-  return asJson(500, { error: msg });
+  // Short, low-collision request id. Clients can quote it when
+  // reporting an issue and we can grep Vercel logs for it.
+  const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  // Full detail goes to the Vercel function log so we can debug.
+  // Stringifying keeps the stack in JSON-friendly shape; the spread
+  // is a no-op for non-objects but lets Error subclasses survive.
+  console.error("Unhandled error:", { requestId, err });
+  return asJson(500, {
+    error: "Internal server error.",
+    requestId,
+  });
 }
