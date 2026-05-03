@@ -17,11 +17,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * App-wide singleton that owns the LiveKit publisher session.
@@ -47,6 +49,20 @@ object BroadcastSession {
     private var eventsJob: Job? = null
     private var startJob: Job? = null
     private var streamObserveJob: Job? = null
+
+    /**
+     * Generation counter incremented on every [start] / [stop] call.
+     * The connect coroutine snapshots this at launch and re-checks it
+     * at every suspension point — if the snapshot no longer matches
+     * the current generation, the request has been superseded
+     * (either by another `start` for a different stream, or by a
+     * `stop` while we were still connecting) and the coroutine
+     * disposes any room it created without ever flipping `_state` or
+     * publishing camera / mic. This closes the race where pressing
+     * "end" during the publisher token RTT briefly turned the camera
+     * on and flickered Live → Idle.
+     */
+    private val sessionGen = AtomicInteger(0)
 
     /**
      * The active LiveKit [Room], if any. Exposed read-only so the
@@ -91,6 +107,9 @@ object BroadcastSession {
 
         _state.value = BroadcastState.Connecting(streamId)
 
+        // Bump the generation BEFORE launching the connect coroutine
+        // so the snapshot we capture is the freshest one.
+        val gen = sessionGen.incrementAndGet()
         startJob?.cancel()
         startJob = scope.launch {
             try {
@@ -103,11 +122,19 @@ object BroadcastSession {
                         )
                     )
                 }
+                if (gen != sessionGen.get()) return@launch
 
                 val newRoom = LiveKit.create(
                     appContext = appContext.applicationContext,
                     options = RoomOptions(adaptiveStream = true, dynacast = true),
                 )
+                if (gen != sessionGen.get()) {
+                    // Superseded between LiveKit.create() and connect():
+                    // dispose the freshly-allocated Room so we don't
+                    // leak an unconnected RTC factory.
+                    newRoom.release()
+                    return@launch
+                }
                 room = newRoom
 
                 eventsJob?.cancel()
@@ -118,10 +145,34 @@ object BroadcastSession {
                     token = tokenResp.token,
                     options = ConnectOptions(autoSubscribe = false),
                 )
+                if (gen != sessionGen.get()) {
+                    // Superseded during the connect handshake. Tear
+                    // down the half-connected Room without publishing
+                    // camera / mic — critical for privacy: pressing
+                    // "end" during the connect RTT must NOT turn the
+                    // camera on for even a single frame.
+                    newRoom.disconnect()
+                    newRoom.release()
+                    if (room === newRoom) room = null
+                    return@launch
+                }
 
                 val local = newRoom.localParticipant
                 local.setCameraEnabled(true)
                 local.setMicrophoneEnabled(true)
+                if (gen != sessionGen.get()) {
+                    // Superseded after camera+mic were published.
+                    // Disable both before tearing down so the LED /
+                    // audio indicators flick off immediately rather
+                    // than waiting for the underlying capture to be
+                    // released by `disconnect()`.
+                    local.setCameraEnabled(false)
+                    local.setMicrophoneEnabled(false)
+                    newRoom.disconnect()
+                    newRoom.release()
+                    if (room === newRoom) room = null
+                    return@launch
+                }
 
                 val cameraTrack = local.getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
                 _state.value = BroadcastState.Live(
@@ -211,9 +262,29 @@ object BroadcastSession {
             is BroadcastState.Failed -> previous.streamId
             BroadcastState.Idle, BroadcastState.Stopping -> null
         }
+
+        // Bump the generation FIRST. The connect coroutine (if still
+        // running) checks `sessionGen.get()` at every suspension point
+        // and aborts cleanly when it sees a newer generation, which
+        // means it will NOT publish camera / mic and will NOT flip
+        // state to Live in the window between the user pressing "end"
+        // and this stop() coroutine actually awaiting on the API. This
+        // is what closes the privacy race that previously caused the
+        // camera to flick on for one frame after the user had already
+        // pressed end.
+        sessionGen.incrementAndGet()
+
         _state.value = BroadcastState.Stopping
+        val pendingStartJob = startJob
         scope.launch {
             try {
+                // Wait for the in-flight connect job (if any) to fully
+                // unwind before we touch the Room or fire the end-stream
+                // API. cancelAndJoin guarantees the coroutine has run
+                // its catch / finally, so any partially-allocated
+                // Room has either been released by the supersede checks
+                // above or is sitting in `room` ready for cleanupRoom.
+                pendingStartJob?.cancelAndJoin()
                 if (streamId != null) {
                     withContext(Dispatchers.IO) {
                         ApiClient.api.endStream(
