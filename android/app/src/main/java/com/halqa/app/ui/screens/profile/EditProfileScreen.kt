@@ -145,14 +145,52 @@ fun EditProfileScreen(navController: NavController) {
                 onClick = {
                     if (saving) return@GoldButton
                     feedback = null
+
+                    // Client-side validation that mirrors `users/me` POST
+                    // validation in `backend/src/app/api/users/me/route.ts`.
+                    //
+                    // The backend rejects:
+                    //   - any allow-listed string field present but empty
+                    //     after trim → 400 "must not be empty after trim"
+                    //   - handle present and not matching
+                    //     `^[a-zA-Z0-9_]{2,24}$` → 400 "handle must be …"
+                    //
+                    // Without these guards a user clearing the displayName /
+                    // bio field, or typing a 1-char handle, lands on
+                    // `humanize()` echoing the English backend error
+                    // ("displayName must not be empty after trim.") inside an
+                    // otherwise Arabic UI. The user has no way to know what
+                    // they did wrong. Pre-flight here so the round trip is
+                    // only spent on inputs that should succeed.
+                    val trimmedDisplayName = displayName.trim()
+                    val trimmedHandle = handle.trim()
+                    val trimmedBio = bio.trim()
+
+                    val nameError = if (trimmedDisplayName.isEmpty())
+                        "الاسم الظاهر مطلوب." else null
+                    val bioError = if (trimmedBio.isEmpty())
+                        "النبذة مطلوبة." else null
+                    val handleError = when {
+                        trimmedHandle.isEmpty() -> null  // backend skips when missing — keep current
+                        trimmedHandle.length < 2 -> "المعرّف يجب أن يكون من حرفين إلى 24."
+                        trimmedHandle.length > 24 -> "المعرّف يجب أن يكون من حرفين إلى 24."
+                        else -> null  // alphanumeric+underscore filter already enforced on input
+                    }
+
+                    val firstError = nameError ?: handleError ?: bioError
+                    if (firstError != null) {
+                        feedback = firstError
+                        return@GoldButton
+                    }
+
                     saving = true
                     scope.launch {
                         try {
                             UserRepository.updateMe(
                                 UpdateProfileRequest(
-                                    displayName = displayName.trim(),
-                                    handle = handle.trim(),
-                                    bio = bio.trim(),
+                                    displayName = trimmedDisplayName,
+                                    handle = trimmedHandle.ifEmpty { null },
+                                    bio = trimmedBio,
                                 )
                             )
                             saving = false
