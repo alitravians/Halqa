@@ -104,8 +104,15 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var showGifts by remember { mutableStateOf(false) }
     val giftCatalog by GiftRepository.catalog.collectAsState()
+    // Lifecycle-aware: detach the Firestore snapshot listener when the
+    // viewer's screen is stopped (notification panel pull, brief app
+    // switch). The watch session itself is owned by [WatchSession]
+    // and is torn down via the [DisposableEffect] below when the
+    // screen is actually disposed; this listener is purely cosmetic
+    // (gift total + status flips) so STOPPED-detach is safe and saves
+    // Firestore reads while the screen is offscreen.
     val streamSnapshot by StreamsRepository.observe(streamId)
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
     var giftError by remember { mutableStateOf<String?>(null) }
     val giftScope = rememberCoroutineScope()
 

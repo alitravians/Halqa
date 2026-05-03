@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,8 +61,15 @@ fun BroadcastingScreen(navController: NavController) {
     val streamId = (state as? BroadcastState.Live)?.streamId
         ?: (state as? BroadcastState.Connecting)?.streamId
         ?: ""
+    // Lifecycle-aware: when the broadcasting screen is stopped (e.g. user
+    // briefly switches to another app via the recent-tasks switcher) the
+    // Firestore snapshot listener is detached. The broadcast itself keeps
+    // running in [LiveBroadcastService] / [BroadcastSession] independently;
+    // this listener only feeds the diamonds-raised overlay, so detaching
+    // it for a backgrounded screen is the correct trade-off (saves
+    // Firestore reads + battery, re-attaches on resume).
     val streamSnapshot by StreamsRepository.observe(streamId)
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
 
     LaunchedEffect(state) {
         if (state is BroadcastState.Idle) {
