@@ -18,6 +18,80 @@ interface TokenBody {
 
 const ROOM_NAME_RE = /^[A-Za-z0-9_-]{4,64}$/;
 
+/**
+ * Hard cap for `streamTitle`. Picked at 120 because:
+ *
+ *   - The Android FeedScreen renders titles via
+ *     `s.title.substringBefore(" ").take(20)`, so anything past the
+ *     first word is unread on the grid. 120 chars leaves a healthy
+ *     margin for two-line render on the LiveWatchScreen header.
+ *   - LiveKit's participant.metadata is capped (effectively low-kB)
+ *     and the title is fed in via `metadata` on the AccessToken.
+ *   - The single most important reason: without this cap, a sender
+ *     can ship a multi-megabyte title which is then:
+ *       1. Written to `streams/{streamId}.title` (Firestore doc 1MB
+ *          hard limit — a single bloated title can push the doc
+ *          near the limit, making subsequent in-place updates
+ *          (viewerCount ticks, status flips) fail with the cryptic
+ *          "Document exceeds maximum size" 500.
+ *       2. Replicated to every viewer's snapshot listener on every
+ *          viewerCount tick — bandwidth amplification: 1MB × N
+ *          viewers per Firestore tick. A single attacker sets the
+ *          burden on every other client (and on the host's data
+ *          plan as their stream room fills).
+ *       3. Echoed into the audit_log entry under
+ *          `metadata.title`, doubling the storage footprint.
+ *
+ * 120 chars matches the implicit cap users/me POST already enforces
+ * for `displayName` / `bio` (280 there, 120 here for grid render),
+ * keeping all user-controlled strings on a small denominator.
+ */
+const STREAM_TITLE_MAX = 120;
+
+/** Default title when the publisher leaves the field blank. */
+const DEFAULT_STREAM_TITLE = "بث جديد";
+
+/**
+ * Normalise an incoming `streamTitle`:
+ *   - undefined / non-string → default ("بث جديد").
+ *   - trimmed empty → default.
+ *   - longer than [STREAM_TITLE_MAX] graphemes → reject (400).
+ *   - else → trimmed string.
+ *
+ * Returning a `string | { error }` discriminated shape keeps the
+ * decision in one place; the caller surfaces 400 with the inner
+ * error verbatim. JS string `.length` counts UTF-16 code units, not
+ * Unicode codepoints — but the 1MB Firestore doc limit is in
+ * BYTES, and one Arabic codepoint in UTF-16 is 1-2 code units, so
+ * `.length <= 120` already guarantees a small byte footprint
+ * (worst case 4 bytes per codepoint × 120 = 480 bytes). Cheaper
+ * than running through Intl.Segmenter for grapheme counting.
+ */
+function normaliseStreamTitle(
+  raw: unknown
+): { ok: true; value: string } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: DEFAULT_STREAM_TITLE };
+  }
+  if (typeof raw !== "string") {
+    return { ok: false, error: "streamTitle must be a string." };
+  }
+  if (raw.length > STREAM_TITLE_MAX) {
+    // Reject BEFORE trim so a 10MB-of-spaces payload still fails
+    // fast — trim() on a multi-megabyte string is cheap but the
+    // round-trip waste isn't worth the courtesy.
+    return {
+      ok: false,
+      error: `streamTitle too long (max ${STREAM_TITLE_MAX} chars).`,
+    };
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return { ok: true, value: DEFAULT_STREAM_TITLE };
+  }
+  return { ok: true, value: trimmed };
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Refuse to issue any tokens if a deploy left the unsafe combo
@@ -38,6 +112,18 @@ export async function POST(req: NextRequest) {
       );
     }
     const role = body.role === "publisher" ? "publisher" : "viewer";
+
+    // Validate the title NOW (before any DB work) so a malformed
+    // payload fails fast with a 400 instead of getting halfway through
+    // a Firestore transaction. The cap also defends against
+    // multi-megabyte titles that would push the streams/{id} doc
+    // toward Firestore's 1MB hard limit and amplify into every viewer's
+    // snapshot listener — see normaliseStreamTitle for the full rationale.
+    const titleResult = normaliseStreamTitle(body.streamTitle);
+    if (!titleResult.ok) {
+      throw new HttpError(400, titleResult.error);
+    }
+    const safeTitle = titleResult.value;
 
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
@@ -143,7 +229,7 @@ export async function POST(req: NextRequest) {
         tx.set(ref, {
           streamId: body.roomName,
           ownerUid: user.uid,
-          title: body.streamTitle?.trim() || "بث جديد",
+          title: safeTitle,
           status: "live",
           startTime: now,
           endTime: null,
@@ -158,7 +244,11 @@ export async function POST(req: NextRequest) {
           timestamp: now,
           metadata: {
             streamId: body.roomName,
-            title: body.streamTitle ?? null,
+            // Always the normalised value — the audit_log entry mirrors
+            // exactly what we wrote to streams/{id}.title, so reviewers
+            // never have to reconcile a bloated raw payload against
+            // the truncated stored title.
+            title: safeTitle,
           },
         });
       });
