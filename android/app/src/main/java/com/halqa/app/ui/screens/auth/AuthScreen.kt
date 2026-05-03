@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.google.android.gms.common.api.ApiException
 import com.halqa.app.data.GoogleAuthRepository
+import com.halqa.app.data.SignupCapReachedException
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.components.TextLinkButton
@@ -64,6 +65,17 @@ fun AuthScreen(navController: NavController) {
                 }
             } catch (e: ApiException) {
                 googleError = mapGoogleApiError(e)
+            } catch (_: SignupCapReachedException) {
+                // Layla's GR5: closed-beta daily signup cap was hit
+                // server-side. The /users/{uid} doc was already created
+                // by ensureUserDoc (it had to be — Created is the
+                // trigger), but we MUST NOT navigate the user to Main
+                // because that would silently soft-launch beyond the
+                // 20/day cap. The orphaned doc is harmless: when the
+                // user retries after staff unlocks, the existing-doc
+                // branch of UserDocBootstrap takes over and patches
+                // anything missing.
+                googleError = "تم بلوغ السقف اليومي للتسجيل في النسخة التجريبية. حاول غداً."
             } catch (t: Throwable) {
                 googleError = "تعذّر تسجيل الدخول عبر Google. حاول لاحقاً."
             } finally {

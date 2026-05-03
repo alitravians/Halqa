@@ -236,6 +236,26 @@ service cloud.firestore {
       allow write: if false; // server only via Admin SDK
     }
 
+    // -------- /metrics/signups/days/{date} (Layla GR5 — daily signup cap) --------
+    // Per-day signup counter + carrier breakdown + lock flag. Written
+    // exclusively by the Admin SDK via /api/signup/heartbeat (see
+    // backend/src/app/api/signup/heartbeat/route.ts). Read by staff via
+    // /api/admin/signup-metrics (Admin SDK side too — that endpoint
+    // doesn't go through these rules), and direct-read by staff on the
+    // Firebase Console for incident response. Direct-read from the
+    // Android client is denied to keep enumeration of carrier
+    // breakdowns and sign-up volume out of regular-user reach.
+    //
+    // The rules MAY look more permissive than strictly necessary
+    // (`/metrics/{...}` would let us close everything in one match),
+    // but spelling out the exact path makes intent obvious for a
+    // future audit and prevents accidental leakage if we ever add a
+    // sibling collection like `/metrics/active_streams/`.
+    match /metrics/{document=**} {
+      allow read: if isStaff();
+      allow write: if false; // server-only via Admin SDK
+    }
+
     // -------- /audit/{userId}/events/{eventId} (per-user durable audit) --------
     // Layla's T&S guardrail GR2. The Android client writes a single
     // `kyc_bypass_granted` event to this collection on first sign-in
