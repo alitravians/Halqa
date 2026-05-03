@@ -95,6 +95,38 @@ export async function POST(req: NextRequest) {
       }
 
       // P0 — atomic create-if-absent so two devices can't open two `live` docs.
+      //
+      // Three cases for an existing doc with this roomName:
+      //
+      //   (a) ownerUid != caller.uid → room-name squatting / impersonation.
+      //   (b) ownerUid == caller.uid && status == "live" → legitimate resume
+      //       of a *still-live* stream. The Android client generates a new
+      //       streamId per session (`u_{uid}_{ts}` in BroadcastSession.start),
+      //       so this realistically only happens when LiveKit briefly
+      //       disconnects and the broadcaster reconnects within the
+      //       room-empty timeout (~5min) — the stream doc was never marked
+      //       ended, just hand them a fresh AccessToken and move on.
+      //   (c) ownerUid == caller.uid && status != "live" → the stream was
+      //       deliberately ended (by the owner via /api/streams/end, by a
+      //       moderator force-ending it, or by the LiveKit room_finished
+      //       webhook). Reusing the same streamId here is dangerous on
+      //       three counts:
+      //         1. Moderation bypass — a moderator force-ends a banned
+      //            stream, the broadcaster immediately POSTs /livekit/token
+      //            with the same roomName, status flips back to "live",
+      //            the moderator's action is silently undone with no
+      //            audit trail.
+      //         2. Audit hole — there's no `stream_start` audit_log entry
+      //            for the resume, so Trust & Safety can't reconstruct
+      //            "the user broadcasted again at time T after being
+      //            ended at time T-30s".
+      //         3. Analytics drift — the resume overwrites `startTime`,
+      //            losing the original session length.
+      //       The radical fix is to refuse the resume entirely. Clients
+      //       that legitimately want to broadcast again must call
+      //       /livekit/token with a fresh streamId (which the Android
+      //       client already generates on every BroadcastSession.start
+      //       via `System.currentTimeMillis()`).
       await db.runTransaction(async (tx) => {
         const ref = db.collection("streams").doc(body.roomName!);
         const existing = await tx.get(ref);
@@ -104,11 +136,9 @@ export async function POST(req: NextRequest) {
             throw new HttpError(409, "Room name already taken by another user.");
           }
           if (data.status !== "live") {
-            // Reuse for resume, mark live again.
-            tx.set(
-              ref,
-              { status: "live", endTime: null, startTime: new Date().toISOString() },
-              { merge: true }
+            throw new HttpError(
+              409,
+              "This stream has already ended. Start a new broadcast."
             );
           }
           return;
