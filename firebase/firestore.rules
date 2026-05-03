@@ -46,14 +46,30 @@ service cloud.firestore {
         && request.resource.data.role == 'user'
         && request.resource.data.uid == userId;
 
-      // user can update profile fields, but role/createdAt are protected
+      // user can update profile fields. role/createdAt/uid stay immutable on
+      // the self-update path so a regular user can never tamper with their
+      // own privilege markers.
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.createdAt == resource.data.createdAt;
 
-      // staff can update role for any user (promotions/demotions)
-      allow update: if isStaff();
+      // staff can promote/demote OTHER users for moderation tooling, but
+      // never themselves (blocks the self-escalation `staff -> admin`
+      // foot-gun) and never beyond `staff` (granting `admin` is reserved
+      // for an existing admin via the rule below). uid + createdAt remain
+      // immutable so audit trails stay intact.
+      allow update: if isStaff()
+        && uid() != userId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.role in ['user', 'scout', 'moderator', 'staff'];
+
+      // admin can update any user (including themselves) and grant any
+      // role. uid + createdAt are still immutable.
+      allow update: if isAdmin()
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt;
 
       // admin only delete
       allow delete: if isAdmin();
@@ -79,8 +95,18 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.uid == userId;
 
-      // user cannot mutate their own KYC after submit (anti-fraud)
+      // staff can review/approve/reject KYC for OTHER users only.
+      // Self-approval is denied to break the conflict-of-interest path:
+      // a staff member who needs to broadcast must have their KYC
+      // reviewed by another staff member or an admin, never themselves.
+      // uid is still immutable.
       allow update: if isStaff()
+        && uid() != userId
+        && request.resource.data.uid == resource.data.uid;
+
+      // admin retains full update authority (including for their own
+      // submission) so the team can never get locked out of approvals.
+      allow update: if isAdmin()
         && request.resource.data.uid == resource.data.uid;
 
       allow delete: if isAdmin();
