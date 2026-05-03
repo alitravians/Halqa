@@ -21,6 +21,19 @@ object ApiClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            // Hard ceiling for the entire call (DNS + TLS + connect + write
+            // body + read body + redirects + the AuthAuthenticator's one
+            // retry). OkHttp's default `callTimeout` is 0, meaning "no
+            // overall cap" — under a slow-loris server, a flaky proxy that
+            // dribbles bytes within `readTimeout`, or a Firebase cached-
+            // token refresh that hangs inside [AuthInterceptor]'s
+            // `runBlocking`, the request would otherwise block its OkHttp
+            // worker thread and the Android UI's "loading" spinner
+            // indefinitely. 60s is generous enough for any healthy call
+            // and short enough to surface a user-visible "تعذّر الاتصال"
+            // failure before the user gives up and force-quits.
+            .callTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(AuthInterceptor())
             // Recover from a 401 by force-refreshing the Firebase ID token and
             // retrying once. Without this, a token that gets revoked server-
