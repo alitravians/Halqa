@@ -187,7 +187,11 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                     giftError = null
                     giftScope.launch {
                         val result = runCatching {
-                            GiftRepository.send(streamId, gift.id)
+                            GiftRepository.send(
+                                streamId = streamId,
+                                giftId = gift.id,
+                                receiverUid = streamSnapshot?.ownerUid,
+                            )
                         }
                         result.onSuccess {
                             // Authoritative balance update lands via

@@ -1,5 +1,6 @@
 package com.halqa.app.data
 
+import com.google.firebase.auth.FirebaseAuth
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.GiftDto
 import com.halqa.app.data.remote.SendGiftRequest
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Gifting orchestration on top of the backend's `/api/gifts/...` endpoints.
@@ -39,6 +41,16 @@ object GiftRepository {
     @Volatile private var catalogLoaded: Boolean = false
 
     /**
+     * Tracks whether a given (sender, receiver) pair has already exchanged
+     * a gift in this process so the `gift_sent` analytics event can flag
+     * the *first* gift correctly. This is in-memory only — Lina's Loop
+     * Closure D1 query in the warehouse self-joins on `ts` over a 24h
+     * window, so we only need a "did this client already log an `is_first
+     * _gift = true` event for this pair?" guard inside the same process.
+     */
+    private val firstGiftSeen = ConcurrentHashMap.newKeySet<String>()
+
+    /**
      * Fetch the gift catalog from the backend. Idempotent — once
      * loaded successfully we don't re-fetch on every screen open.
      * The backend caches the response for 60s anyway.
@@ -64,11 +76,55 @@ object GiftRepository {
      * Throws on backend failure (insufficient coins, stream ended,
      * self-gift, etc). Caller surfaces the message.
      */
-    suspend fun send(streamId: String, giftId: String, count: Int = 1): SendGiftResponse {
+    suspend fun send(
+        streamId: String,
+        giftId: String,
+        count: Int = 1,
+        receiverUid: String? = null,
+    ): SendGiftResponse {
         return sendMutex.withLock {
-            withContext(Dispatchers.IO) {
+            val response = withContext(Dispatchers.IO) {
                 ApiClient.api.sendGift(SendGiftRequest(streamId, giftId, count))
             }
+            if (response.ok) {
+                logGiftSent(receiverUid, giftId, response, count)
+            }
+            response
         }
+    }
+
+    /**
+     * Lina Al-Saud (Growth & Ad Campaigns Lead, session
+     * a03fa7dc00a740f884f8e65c7320acef) — Loop Closure Rate D1 is the
+     * single beta KPI; without this event we ship blind. Schema
+     * matches the warehouse query exactly.
+     *
+     * The receiver UID is sourced from the call-site (LiveWatchScreen
+     * already observes `StreamSnapshot.ownerUid` via M1's SSoT pipe),
+     * not from the response, so we don't require a backend change.
+     */
+    private fun logGiftSent(
+        receiverUid: String?,
+        giftId: String,
+        @Suppress("UNUSED_PARAMETER") response: SendGiftResponse,
+        count: Int,
+    ) {
+        val senderUid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val receiver = receiverUid ?: return
+        // Per-unit price is from the cached catalogue — multiplied by
+        // the requested count to match the actual server-side debit.
+        val unitCoins = _catalog.value.firstOrNull { it.id == giftId }?.priceCoins ?: 0
+        val totalCoins = unitCoins.toLong() * count.toLong().coerceAtLeast(1L)
+        val pairKey = "$senderUid->$receiver"
+        val isFirstGift = firstGiftSeen.add(pairKey)
+        runCatching {
+            Analytics.giftSent(
+                senderUid = senderUid,
+                receiverUid = receiver,
+                giftId = giftId,
+                coins = totalCoins,
+                isFirstGift = isFirstGift,
+            )
+        }.onFailure { Analytics.logNonFatal(it, tag = "gift_sent_event") }
     }
 }
