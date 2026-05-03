@@ -15,16 +15,21 @@ export async function GET(req: NextRequest) {
   }
 }
 
-const ALLOWED = ["displayName", "handle", "bio", "avatar"] as const;
-type AllowedKey = (typeof ALLOWED)[number];
+const ALLOWED_KEYS = ["displayName", "bio", "avatar"] as const;
 
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser(req);
     const body = (await req.json()) as Record<string, unknown>;
 
-    const update: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-    for (const key of ALLOWED) {
+    const now = new Date().toISOString();
+    const update: Record<string, unknown> = { updatedAt: now };
+
+    // Trim every string field on the way in so leading / trailing
+    // whitespace doesn't sneak into displayName ("   اسمي   ") and so
+    // empty-after-trim fields are rejected rather than silently
+    // overwriting the user's previous value with "".
+    for (const key of ALLOWED_KEYS) {
       if (key in body) {
         const v = body[key];
         if (typeof v !== "string") {
@@ -33,7 +38,11 @@ export async function POST(req: NextRequest) {
         if (v.length > 280) {
           throw new HttpError(400, `${key} too long (max 280 chars).`);
         }
-        update[key] = v;
+        const trimmed = v.trim();
+        if (trimmed.length === 0) {
+          throw new HttpError(400, `${key} must not be empty after trim.`);
+        }
+        update[key] = trimmed;
       }
     }
 
@@ -45,14 +54,33 @@ export async function POST(req: NextRequest) {
       update.handle = h;
     }
 
-    const ref = adminFirestore().collection("users").doc(user.uid);
-    await ref.set(update, { merge: true });
+    if (Object.keys(update).length === 1) {
+      // only `updatedAt` — nothing meaningful to write. Reject so the
+      // client doesn't think a no-op succeeded silently.
+      throw new HttpError(400, "no valid profile fields to update.");
+    }
 
-    await adminFirestore().collection("audit_log").add({
-      userId: user.uid,
-      action: "profile_update",
-      timestamp: new Date().toISOString(),
-      metadata: { fields: Object.keys(update).filter((k) => k !== "updatedAt") },
+    const db = adminFirestore();
+    const ref = db.collection("users").doc(user.uid);
+
+    // Atomic profile update + audit_log write. Old code did the two
+    // operations in separate round trips, so a Vercel function
+    // timeout between them produced a profile change with no audit
+    // record — Trust & Safety lost the trail. Using set+merge inside
+    // the txn preserves the ability to upsert if the user doc
+    // somehow doesn't exist (shouldn't happen — requireUser
+    // self-creates — but cheap defence).
+    await db.runTransaction(async (tx) => {
+      const auditRef = db.collection("audit_log").doc();
+      tx.set(ref, update, { merge: true });
+      tx.set(auditRef, {
+        userId: user.uid,
+        action: "profile_update",
+        timestamp: now,
+        metadata: {
+          fields: Object.keys(update).filter((k) => k !== "updatedAt"),
+        },
+      });
     });
 
     const fresh = await ref.get();
