@@ -89,7 +89,18 @@ fun StaffSignInScreen(navController: NavController) {
         errorText = null
         loading = true
         scope.launch {
-            val result = AuthRepository.signInWithEmail(email, password)
+            // Strict sign-in: do NOT auto-create the Firebase Auth user
+            // here even if the email is unknown. The staff sign-in
+            // surface is reachable from the public auth screen, and
+            // auto-create on a typo'd email would (a) silently mint a
+            // throwaway Firebase Auth account on every attempt — Auth
+            // user counts have quota + billing implications — and (b)
+            // give the typist a working `user`-role session they did
+            // not actually intend to create. Staff accounts must be
+            // provisioned by an admin via the Firebase Console + a
+            // `/users/{uid}.role` write; if the email is unknown the
+            // sign-in must fail closed.
+            val result = AuthRepository.signInWithEmailStrict(email, password)
             loading = false
             when (result) {
                 is AuthResult.Success -> {
