@@ -14,9 +14,18 @@
 # launch in M3+), the script also fails if BYPASS_KYC_FOR_BETA is still
 # enabled. During closed beta we leave that off.
 #
+# `--strict-no-kyc-bypass` requires the HEALTH_INTERNAL_TOKEN env var
+# because the kycBypass flag is no longer exposed in the public health
+# payload (any scraper hitting /api/health used to be told whether
+# closed-beta KYC bypass was on — a useful hint for abuse). The
+# script authenticates with `Authorization: Bearer $HEALTH_INTERNAL_TOKEN`
+# to receive the internal payload. Set the same token in Vercel env
+# vars for the backend project so server and ops agree on the secret.
+#
 # Environment overrides:
-#   HALQA_BACKEND_URL   (default: https://halqa-backend.vercel.app)
-#   HEALTH_TIMEOUT_S    (default: 30)
+#   HALQA_BACKEND_URL       (default: https://halqa-backend.vercel.app)
+#   HEALTH_TIMEOUT_S        (default: 30)
+#   HEALTH_INTERNAL_TOKEN   (required for --strict-no-kyc-bypass)
 #
 # Exit codes:
 #   0 = all good
@@ -48,12 +57,31 @@ HEALTH_URL="${BASE_URL%/}/api/health"
 
 echo "==> probing $HEALTH_URL (timeout ${TIMEOUT}s)"
 
+# Strict mode requires the internal token because kycBypass.enabled is
+# only exposed to authenticated callers — refuse early so a CI run that
+# *thinks* it's enforcing the no-bypass invariant doesn't silently
+# degrade to "yeah I checked, it's fine" against a sanitised payload
+# that simply omits the field.
+if [ "$STRICT_NO_KYC_BYPASS" = "1" ] && [ -z "${HEALTH_INTERNAL_TOKEN:-}" ]; then
+  echo "FAIL: --strict-no-kyc-bypass requires HEALTH_INTERNAL_TOKEN env var." >&2
+  echo "      The kycBypass flag is no longer in the public payload." >&2
+  echo "      Set HEALTH_INTERNAL_TOKEN to the same value provisioned in" >&2
+  echo "      Vercel env vars for the backend project." >&2
+  exit 2
+fi
+
 # We want both the body and the HTTP status code, even on 503 (which is
 # the *correct* response when a subsystem is down — curl --fail would hide it).
 TMP_BODY="$(mktemp)"
 trap 'rm -f "$TMP_BODY"' EXIT
 
+CURL_AUTH_ARGS=()
+if [ -n "${HEALTH_INTERNAL_TOKEN:-}" ]; then
+  CURL_AUTH_ARGS=(-H "Authorization: Bearer ${HEALTH_INTERNAL_TOKEN}")
+fi
+
 HTTP_STATUS=$(curl --silent --show-error --max-time "$TIMEOUT" \
+  "${CURL_AUTH_ARGS[@]}" \
   --output "$TMP_BODY" --write-out '%{http_code}' "$HEALTH_URL" \
   || echo "000")
 
