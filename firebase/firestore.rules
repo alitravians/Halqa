@@ -167,12 +167,14 @@ service cloud.firestore {
       //   - moderators investigating gift-fraud reports.
       // Hosts and senders both have legitimate reasons to see "what was
       // sent in my stream" / "what did I send" UIs in the future, so we
-      // allow the host (resource.data.recipientUid == uid()) and the
+      // allow the host (resource.data.receiverUid == uid()) and the
       // sender (resource.data.senderUid == uid()) to read their own
-      // entries. No client writes — writes go through the gift txn.
+      // entries. The field name MUST stay aligned with the writer in
+      // backend/src/app/api/gifts/send/route.ts (`receiverUid: ownerUid`).
+      // No client writes — writes go through the gift txn.
       match /gifts/{giftId} {
         allow read: if isStaff()
-          || (isSignedIn() && resource.data.recipientUid == uid())
+          || (isSignedIn() && resource.data.receiverUid == uid())
           || (isSignedIn() && resource.data.senderUid == uid());
         allow write: if false; // server-only via Admin SDK
       }
