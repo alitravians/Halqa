@@ -148,9 +148,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // PDPL-critical: the LiveKit `name` field is broadcast to every
+    // other participant in the room as part of the participant
+    // metadata. We MUST NOT put `email` or `phoneNumber` here — those
+    // are PII and Halqa's privacy policy promises they never leave the
+    // backend. The previous fallback chain (`email || phoneNumber || uid`)
+    // exposed every host's email/phone to every viewer of their stream
+    // (and every viewer's email/phone to every other viewer).
+    //
+    // Use the public profile fields only:
+    //   1. displayName — what the user typed in their profile
+    //   2. handle      — public @-name fallback
+    //   3. uid         — opaque pseudonymous string, last resort so
+    //                    LiveKit always has a non-empty value
     const at = new AccessToken(apiKey, apiSecret, {
       identity: user.uid,
-      name: user.email || user.phoneNumber || user.uid,
+      name: user.displayName || user.handle || user.uid,
       ttl: 60 * 60, // 1 hour
     });
     at.addGrant({

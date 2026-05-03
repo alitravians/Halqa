@@ -7,6 +7,15 @@ export interface AuthedUser {
   uid: string;
   email: string | null;
   phoneNumber: string | null;
+  /**
+   * Display name from the user's Firestore profile. Safe to surface to
+   * other participants in a stream (LiveKit room name, chat sender name,
+   * etc.). Distinct from `email` / `phoneNumber`, which are PII and must
+   * never leave the backend.
+   */
+  displayName: string | null;
+  /** Public handle (e.g. "@aliali"). Safe to surface alongside displayName. */
+  handle: string | null;
   role: UserRole;
 }
 
@@ -37,17 +46,28 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
   const userRef = adminFirestore().collection("users").doc(uid);
   const snap = await userRef.get();
   let role: UserRole = "user";
+  let displayName: string | null = null;
+  let handle: string | null = null;
   if (snap.exists) {
-    const r = (snap.data()?.role || "user") as UserRole;
-    role = r;
+    const data = snap.data() ?? {};
+    role = (data.role || "user") as UserRole;
+    // Read PII-safe profile fields from the same snapshot we already
+    // fetched for role. Coerced to non-empty string-or-null so callers
+    // can do `displayName ?? handle ?? <fallback>` without worrying
+    // about empty strings sneaking through as truthy.
+    const dn = typeof data.displayName === "string" ? data.displayName.trim() : "";
+    const hd = typeof data.handle === "string" ? data.handle.trim() : "";
+    displayName = dn.length > 0 ? dn : null;
+    handle = hd.length > 0 ? hd : null;
   } else {
     // Self-create on first call.
+    const initialDisplayName = (decoded.name || "").trim();
     await userRef.set(
       {
         uid,
         email: decoded.email || null,
         phoneNumber: decoded.phone_number || null,
-        displayName: decoded.name || "",
+        displayName: initialDisplayName,
         handle: "",
         bio: "",
         avatar: "",
@@ -57,12 +77,15 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
       },
       { merge: true }
     );
+    displayName = initialDisplayName.length > 0 ? initialDisplayName : null;
   }
 
   return {
     uid,
     email: decoded.email || null,
     phoneNumber: decoded.phone_number || null,
+    displayName,
+    handle,
     role,
   };
 }
