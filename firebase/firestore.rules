@@ -194,6 +194,25 @@ service cloud.firestore {
           || (isSignedIn() && resource.data.senderUid == uid());
         allow write: if false; // server-only via Admin SDK
       }
+
+      // -------- /streams/{streamId}/giftRateCounters/{senderUid} (subcollection) --------
+      // Per-(stream, sender) rate-limit counter. Maintains two sliding
+      // windows (60s + 1h) inside the gift transaction so the
+      // 5/60s + 60/hr caps are enforced atomically with the wallet
+      // debit (no TOCTOU bypass via concurrent requests). Written
+      // exclusively by `assertAndIncrementGiftRate` in
+      // backend/src/lib/gift-rate-limit.ts; never surfaced in any UI
+      // and never read by a client. Locked client-side to deny ALL
+      // access — only the Admin SDK touches these docs.
+      //
+      // If a client read path is ever desired ("how many gifts have I
+      // sent in this stream this hour"), it should go through a new
+      // backend endpoint that reads the counter via Admin SDK and
+      // returns a sanitised payload — not by relaxing this rule.
+      match /giftRateCounters/{senderUid} {
+        allow read: if false;
+        allow write: if false;
+      }
     }
 
     // -------- /wallets/{uid} --------
