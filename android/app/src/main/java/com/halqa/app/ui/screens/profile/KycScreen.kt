@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,7 +66,13 @@ fun KycScreen(navController: NavController) {
         return
     }
 
-    val status by observeKyc(uid).collectAsState(initial = KycStatusDto())
+    // Lifecycle-aware so the underlying Firestore snapshot listener
+    // (registered inside `observeKyc` via `addSnapshotListener`) is
+    // detached when the user navigates away — without this, the
+    // listener stays attached for the lifetime of the back-stack
+    // entry and burns Firestore reads + battery while the user is
+    // anywhere else in the app.
+    val status by observeKyc(uid).collectAsStateWithLifecycle(initialValue = KycStatusDto())
 
     Column(
         modifier = Modifier
