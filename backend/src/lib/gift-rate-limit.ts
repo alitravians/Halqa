@@ -1,4 +1,4 @@
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, type Transaction } from "firebase-admin/firestore";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { HttpError } from "@/lib/auth";
 
@@ -62,18 +62,25 @@ export async function assertGiftRateOk(
  * Host-managed blocklist: writes at users/{hostUid}/giftBlocklist/{senderUid}
  * Any doc presence (regardless of contents) blocks the sender from gifting
  * the host. Hosts manage this from their stream UI (Phase C).
+ *
+ * Transaction support: when [tx] is supplied, the blocklist read participates
+ * in the caller's Firestore transaction snapshot. This is what makes the
+ * "host blocks the sender after the read but before the write" race actually
+ * close — without it, a vanilla `.get()` would return a stale snapshot that
+ * Firestore's commit step has no way to invalidate, and the gift would still
+ * land. Callers inside `runTransaction(...)` MUST pass the transaction.
  */
 export async function assertNotBlockedFromGifting(
   hostUid: string,
-  senderUid: string
+  senderUid: string,
+  tx?: Transaction
 ): Promise<void> {
-  const db = adminFirestore();
-  const blockSnap = await db
+  const ref = adminFirestore()
     .collection("users")
     .doc(hostUid)
     .collection("giftBlocklist")
-    .doc(senderUid)
-    .get();
+    .doc(senderUid);
+  const blockSnap = tx ? await tx.get(ref) : await ref.get();
 
   if (blockSnap.exists) {
     throw new HttpError(
