@@ -67,7 +67,26 @@ import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
-private val categories = listOf("ترفيه", "موسيقى", "ألعاب", "دردشة", "تعليم", "طبخ", "رياضة", "ثقافة")
+// The pre-broadcast category chip list was deleted along with its `var
+// category` state. The chips were unwired in exactly the same way as the
+// audio-only / allow-PK / chat-filter toggles removed in PR #37: the
+// selected value lived in a private Compose `mutableStateOf`, the user
+// could click and visually "pick" a category, but `launchBroadcast()`
+// never read the value, `BroadcastSession.start()` did not accept it,
+// `LiveKitTokenRequest` had no `category` field, and the backend
+// `streams/{id}` doc has no `category` column for `FeedScreen` to
+// filter on (`StreamPreview.category` is hard-coded to "الكل" by
+// `FeedScreen` because there's nothing to read).
+//
+// A control that lets the user think they're picking "موسيقى" when in
+// reality every stream they create is uncategorised is a UX lie — the
+// host expects to appear under the موسيقى chip in `FeedScreen` and
+// silently does not, with no error message.
+//
+// Bring this back when categories are an end-to-end feature: backend
+// validation against an allow-list, persistence on the streams doc,
+// `LiveStreamDto.category`, and a real `FeedScreen` filter that reads
+// it.
 
 @Composable
 fun GoLivePrepScreen(navController: NavController) {
@@ -100,7 +119,6 @@ fun GoLivePrepScreen(navController: NavController) {
     }
 
     var title by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf(categories.first()) }
     var showWarningDialog by remember { mutableStateOf(false) }
     var showPermissionRationale by remember { mutableStateOf(false) }
     var showSignInRequired by remember { mutableStateOf(false) }
@@ -229,46 +247,6 @@ fun GoLivePrepScreen(navController: NavController) {
             label = "عنوان البث",
             placeholder = "مثال: حلقة الترفيه المسائية",
         )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            "التصنيف",
-            color = HalqaColors.TextMuted,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(HalqaColors.BgElevated)
-                    .border(1.dp, HalqaColors.Border, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-            ) {
-                Column {
-                    categories.chunked(4).forEach { row ->
-                        Row {
-                            row.forEach { c ->
-                                val sel = c == category
-                                Box(
-                                    modifier = Modifier
-                                        .padding(4.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (sel) Brush.linearGradient(listOf(HalqaColors.Brand, HalqaColors.Pink)) else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.05f), Color.White.copy(alpha = 0.05f))))
-                                        .clickable { category = c }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                ) {
-                                    Text(c, color = if (sel) Color.White else HalqaColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // The pre-broadcast options card ("audio-only", "allow PK", "auto chat
         // filters") was removed because none of those toggles were wired
