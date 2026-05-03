@@ -31,5 +31,19 @@
 -keep class livekit.** { *; }
 -keep class org.webrtc.** { *; }
 
+# Reem Al-Otaibi (Play Store Ops & Performance Lead) — keep rules
+# session: 6e36fb767a5d48d585dce5685ddc77c8
+# Without these, R8 in release builds rewrites Firestore POJO field
+# names and breaks deserialization at runtime — silent crashes that
+# only surface in production. M2/M1 added StreamSnapshot + the
+# wallets/{uid}, streams/{id}/gifts/{txnId} POJOs that need this.
+-keep class com.halqa.app.data.** { *; }
+-keep class com.halqa.app.domain.** { *; }
+-keepattributes *Annotation*, Signature
+
+# Firebase Crashlytics — keep stack traces readable post-R8.
+-keep class com.google.firebase.crashlytics.** { *; }
+-keepattributes SourceFile, LineNumberTable
+
 # Hilt
 -keep,allowobfuscation,allowshrinking class dagger.hilt.android.lifecycle.HiltViewModel

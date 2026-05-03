@@ -23,6 +23,8 @@ ktx-collections = "1.4.5"
 work = "2.9.1"
 firebaseBom = "33.6.0"
 googleServices = "4.4.2"
+firebaseCrashlytics = "3.0.2"
+firebasePerf = "1.4.2"
 playAuth = "21.2.0"
 
 [libraries]
@@ -72,6 +74,9 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth-ktx" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore-ktx" }
 firebase-common = { group = "com.google.firebase", name = "firebase-common-ktx" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
+firebase-perf = { group = "com.google.firebase", name = "firebase-perf" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playAuth" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
@@ -83,3 +88,5 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlytics" }
+firebase-perf = { id = "com.google.firebase.firebase-perf", version.ref = "firebasePerf" }

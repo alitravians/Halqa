@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.halqa.app.data.StreamsRepository
 import com.halqa.app.livekit.BroadcastSession
 import com.halqa.app.livekit.BroadcastState
 import com.halqa.app.livekit.HalqaVideoRenderer
@@ -54,6 +55,13 @@ import com.halqa.app.ui.theme.HalqaColors
 fun BroadcastingScreen(navController: NavController) {
     val context = LocalContext.current
     val state by BroadcastSession.state.collectAsState()
+    // Track current streamId so we only listen on the live stream's
+    // doc; observeStream("") emits null and is safe.
+    val streamId = (state as? BroadcastState.Live)?.streamId
+        ?: (state as? BroadcastState.Connecting)?.streamId
+        ?: ""
+    val streamSnapshot by StreamsRepository.observe(streamId)
+        .collectAsState(initial = null)
 
     LaunchedEffect(state) {
         if (state is BroadcastState.Idle) {
@@ -77,6 +85,7 @@ fun BroadcastingScreen(navController: NavController) {
                 )
                 LiveOverlay(
                     viewerCount = s.viewerCount,
+                    diamondsRaised = streamSnapshot?.giftTotal ?: 0L,
                     cameraEnabled = s.cameraEnabled,
                     micEnabled = s.micEnabled,
                     onToggleCam = { BroadcastSession.toggleCamera() },
@@ -105,6 +114,7 @@ private fun CenterMessage(text: String) {
 @Composable
 private fun LiveOverlay(
     viewerCount: Int,
+    diamondsRaised: Long,
     cameraEnabled: Boolean,
     micEnabled: Boolean,
     onToggleCam: () -> Unit,
@@ -116,6 +126,10 @@ private fun LiveOverlay(
             LiveBadge()
             Spacer(Modifier.size(10.dp))
             ViewerChip(viewerCount)
+            if (diamondsRaised > 0L) {
+                Spacer(Modifier.size(8.dp))
+                DiamondsChip(diamondsRaised)
+            }
         }
 
         Spacer(Modifier.weight(1f))
@@ -167,6 +181,26 @@ private fun ViewerChip(count: Int) {
         Icon(Icons.Filled.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
         Spacer(Modifier.size(4.dp))
         Text("$count", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun DiamondsChip(amount: Long) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xCC000000))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("\uD83D\uDC8E", fontSize = 12.sp)
+        Spacer(Modifier.size(4.dp))
+        Text(
+            "$amount",
+            color = HalqaColors.Gold,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 

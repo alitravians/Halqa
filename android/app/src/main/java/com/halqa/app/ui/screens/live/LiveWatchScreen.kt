@@ -49,11 +49,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import com.halqa.app.data.ChatMsg
 import com.halqa.app.data.ChatRepository
-import com.halqa.app.data.Gift
+import com.halqa.app.data.GiftRepository
 import com.halqa.app.data.MockData
+import com.halqa.app.data.StreamsRepository
+import com.halqa.app.data.remote.GiftDto
 import com.halqa.app.livekit.HalqaVideoRenderer
+import kotlinx.coroutines.launch
 import com.halqa.app.livekit.WatchSession
 import com.halqa.app.livekit.WatchState
 import com.halqa.app.ui.components.GlassCard
@@ -98,6 +103,18 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     val messages by ChatRepository.observe(streamId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var showGifts by remember { mutableStateOf(false) }
+    val giftCatalog by GiftRepository.catalog.collectAsState()
+    val streamSnapshot by StreamsRepository.observe(streamId)
+        .collectAsState(initial = null)
+    var giftError by remember { mutableStateOf<String?>(null) }
+    val giftScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        // Catalogue is server-authoritative; refresh on entry so a price
+        // change rolls out without an app release. The repository keeps
+        // a process-wide cache so this is cheap on a re-open.
+        runCatching { GiftRepository.ensureCatalog() }
+    }
 
     DisposableEffect(streamId) {
         WatchSession.start(context.applicationContext, streamId, ownerUid = null)
@@ -160,10 +177,56 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
             exit = fadeOut(),
         ) {
             GiftPanel(
-                gifts = MockData.gifts,
-                onDismiss = { showGifts = false },
-                onSend = { showGifts = false },
+                gifts = giftCatalog,
+                error = giftError,
+                onDismiss = {
+                    showGifts = false
+                    giftError = null
+                },
+                onSend = { gift ->
+                    giftError = null
+                    giftScope.launch {
+                        val result = runCatching {
+                            GiftRepository.send(
+                                streamId = streamId,
+                                giftId = gift.id,
+                                receiverUid = streamSnapshot?.ownerUid,
+                            )
+                        }
+                        result.onSuccess {
+                            // Authoritative balance update lands via
+                            // WalletRepository's Firestore listener.
+                            // Stream giftTotal lands via
+                            // StreamsRepository.observe (M1 SSoT).
+                            showGifts = false
+                        }.onFailure { t ->
+                            giftError = t.message ?: "تعذّر إرسال الهدية"
+                        }
+                    }
+                },
             )
+        }
+
+        // Diamonds-raised badge mirrors what the broadcaster sees —
+        // both surfaces read the same StreamSnapshot.giftTotal field,
+        // so the count never drifts between viewer and host.
+        val diamondsRaised = streamSnapshot?.giftTotal ?: 0L
+        if (diamondsRaised > 0L) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xCC000000))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    "💎 $diamondsRaised",
+                    color = HalqaColors.Gold,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
 }
@@ -372,8 +435,14 @@ private fun BottomBar(onGift: () -> Unit, onLike: () -> Unit) {
 }
 
 @Composable
-private fun GiftPanel(gifts: List<Gift>, onDismiss: () -> Unit, onSend: (Gift) -> Unit) {
-    var selected by remember { mutableStateOf<Gift?>(null) }
+private fun GiftPanel(
+    gifts: List<GiftDto>,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSend: (GiftDto) -> Unit,
+) {
+    var selected by remember { mutableStateOf<GiftDto?>(null) }
+    var sending by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -394,17 +463,41 @@ private fun GiftPanel(gifts: List<Gift>, onDismiss: () -> Unit, onSend: (Gift) -
                 }
             }
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(vertical = 8.dp),
-            ) {
-                items(gifts) { gift ->
-                    GiftItem(
-                        gift = gift,
-                        isSelected = selected == gift,
-                        onClick = { selected = gift },
+            if (gifts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "جارٍ تحميل الهدايا…",
+                        color = HalqaColors.TextMuted,
+                        fontSize = 13.sp,
                     )
                 }
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    items(gifts) { gift ->
+                        GiftItem(
+                            gift = gift,
+                            isSelected = selected?.id == gift.id,
+                            onClick = { selected = gift },
+                        )
+                    }
+                }
+            }
+
+            if (error != null) {
+                Text(
+                    error,
+                    color = HalqaColors.Pink,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -413,19 +506,34 @@ private fun GiftPanel(gifts: List<Gift>, onDismiss: () -> Unit, onSend: (Gift) -
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("💰 12,480 كوين", color = HalqaColors.Gold, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    selected?.let { "${it.priceCoins} كوين" } ?: "اختر هدية للإرسال",
+                    color = HalqaColors.Gold,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                val canSend = selected != null && !sending
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(14.dp))
                         .background(
-                            if (selected != null) Brush.linearGradient(listOf(HalqaColors.Brand, HalqaColors.Pink))
+                            if (canSend) Brush.linearGradient(listOf(HalqaColors.Brand, HalqaColors.Pink))
                             else Brush.linearGradient(listOf(Color.Gray, Color.DarkGray)),
                         )
-                        .clickable(enabled = selected != null) { selected?.let { onSend(it) } }
+                        .clickable(enabled = canSend) {
+                            selected?.let {
+                                sending = true
+                                onSend(it)
+                            }
+                        }
                         .padding(horizontal = 20.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        if (selected != null) "إرسال ${selected!!.emoji}" else "اختر هدية",
+                        when {
+                            sending -> "جارٍ الإرسال…"
+                            selected != null -> "إرسال ${selected!!.emoji}"
+                            else -> "اختر هدية"
+                        },
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -437,7 +545,7 @@ private fun GiftPanel(gifts: List<Gift>, onDismiss: () -> Unit, onSend: (Gift) -
 }
 
 @Composable
-private fun GiftItem(gift: Gift, isSelected: Boolean, onClick: () -> Unit) {
+private fun GiftItem(gift: GiftDto, isSelected: Boolean, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
@@ -455,6 +563,6 @@ private fun GiftItem(gift: Gift, isSelected: Boolean, onClick: () -> Unit) {
         Text(gift.emoji, fontSize = 30.sp)
         Spacer(Modifier.height(4.dp))
         Text(gift.name, color = HalqaColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        Text("${gift.price}", color = HalqaColors.Gold, fontSize = 10.sp)
+        Text("${gift.priceCoins}", color = HalqaColors.Gold, fontSize = 10.sp)
     }
 }
