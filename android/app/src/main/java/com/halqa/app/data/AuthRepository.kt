@@ -57,7 +57,7 @@ object AuthRepository {
         } catch (t: Throwable) {
             return AuthResult.Failure(mapAuthFailure(t))
         }
-        val role = resolveRoleForUid(user.uid, fallbackEmail = trimmed)
+        val role = resolveRoleForUid(user.uid)
         val account = StaffAccount(
             id = user.uid,
             email = user.email ?: trimmed,
@@ -123,38 +123,58 @@ object AuthRepository {
     }
 
     /**
-     * Role lookup with a small offline grace policy:
-     *  - Try Firestore /users/{uid}.role first.
-     *  - If the doc is missing OR has no `role` field, fall back to the
-     *    well-known seed emails (admin@halqa.app etc.) so first-time staff
-     *    sign-in works without manually pre-creating Firestore docs.
-     *  - On Firestore I/O failure, also fall back to seed-by-email.
-     *  - Default: UserRole.User.
+     * Role lookup. Strict server-side authority:
+     *  - Try Firestore `/users/{uid}.role`. Whatever the backend wrote
+     *    there is the truth.
+     *  - If the doc is missing OR has no `role` field OR the read
+     *    fails (offline, transient Firestore error, permission denied
+     *    while rules propagate), default to [UserRole.User] — the
+     *    least-privileged value.
+     *
+     * Why no email-based fallback:
+     *
+     * The previous implementation seeded roles client-side by matching
+     * the signed-in email against a hardcoded map (admin@halqa.app →
+     * Admin, etc.) whenever the Firestore role read returned nothing.
+     * That was a privilege-confusion vector: Firebase Auth doesn't
+     * verify email ownership at sign-up, and
+     * `signInOrCreateWithEmail` auto-creates accounts the first time
+     * they're seen. So anyone who could reach the staff sign-in
+     * screen and type `admin@halqa.app` with any password would, on
+     * the very first attempt (before the backend's `requireUser`
+     * had a chance to write a `role: "user"` doc), get
+     * `UserRole.Admin` on the client. The backend / firestore rules
+     * reject the actual privileged actions, but the UI exposes the
+     * admin surface (staff home, audit-log tools, role-gated
+     * navigation entries) — which is information disclosure on its
+     * own and ammunition for follow-on attacks.
+     *
+     * Staff bootstrap is a server-side concern. The intended flow is:
+     *
+     *   1. Real human creates the staff account in Firebase Console.
+     *   2. Admin runs an Admin-Panel action (or `firestore` write
+     *      with the Admin SDK) to set `/users/{uid}.role = "admin"`.
+     *   3. Staff signs in. Their `/users/{uid}` doc already exists
+     *      with the correct role.
+     *
+     * For closed-beta we accept that a freshly-created staff account
+     * which has not yet been promoted will see the regular-user UI
+     * — that's the safe default and the user-visible fix is "ask
+     * an existing admin to promote you", not "type the magic email".
      */
-    private suspend fun resolveRoleForUid(uid: String, fallbackEmail: String): UserRole {
+    private suspend fun resolveRoleForUid(uid: String): UserRole {
         return try {
             val snap = FirebaseFirestore.getInstance()
                 .collection("users").document(uid).get().await()
             val key = snap.getString("role")
             if (key.isNullOrBlank()) {
-                // No role doc yet — first sign-in. Use the seed map so the
-                // ali-provided staff bootstrap accounts get the correct role
-                // without admin-panel intervention.
-                seedRoleForEmail(fallbackEmail)
+                UserRole.User
             } else {
                 UserRole.fromKey(key) ?: UserRole.User
             }
         } catch (_: Throwable) {
-            seedRoleForEmail(fallbackEmail)
+            UserRole.User
         }
-    }
-
-    private fun seedRoleForEmail(email: String): UserRole = when (email.lowercase()) {
-        "admin@halqa.app" -> UserRole.Admin
-        "staff@halqa.app" -> UserRole.Staff
-        "mod@halqa.app" -> UserRole.Moderator
-        "scout@halqa.app" -> UserRole.Scout
-        else -> UserRole.User
     }
 
     /**
