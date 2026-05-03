@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { WebhookReceiver } from "livekit-server-sdk";
 import {
-  FieldValue,
   type DocumentReference,
   type UpdateData,
 } from "firebase-admin/firestore";
@@ -151,9 +150,49 @@ export async function POST(req: NextRequest) {
           // Publisher's own join — don't count as a viewer.
           break;
         }
-        await tryWebhookUpdate(ref, {
-          viewerCount: FieldValue.increment(1),
-          lastWebhookAt: new Date().toISOString(),
+        // Gate the increment on `status === "live"` inside a
+        // transaction. LiveKit Cloud delivers webhooks at-least-once
+        // and DOES NOT guarantee ordered delivery; a
+        // `participant_joined` can land after `room_finished` for the
+        // same room when:
+        //
+        //   1. The publisher pressed end (POST /api/streams/end flips
+        //      status to "ended" + sets endTime). Some viewers'
+        //      `participant_joined` events were still in LiveKit's
+        //      delivery queue.
+        //
+        //   2. LiveKit's empty-room timeout fired `room_finished`
+        //      seconds before a delayed-delivery `participant_joined`
+        //      retry from earlier in the session.
+        //
+        // Without this gate, the late join used to push viewerCount
+        // back up on an already-ended doc — leaving the stream with
+        // a non-zero count even though `room_finished` had explicitly
+        // zeroed it. The host's notification (driven by the SSoT
+        // viewerCount) and any StreamHistory consumer would then read
+        // a phantom number.
+        //
+        // The check is the same idempotency-on-status pattern that
+        // /api/streams/end and the `room_finished` branch above
+        // already use, so the three lifecycle paths agree on
+        // "ended means ended — no late mutations".
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists) return;
+          const data = snap.data() ?? {};
+          if (data.status !== "live") {
+            // Stream has ended (publisher- or webhook-initiated).
+            // Drop this late join silently; the next event will
+            // arrive against a doc that's still ended and we'll
+            // drop it the same way.
+            tx.update(ref, { lastWebhookAt: new Date().toISOString() });
+            return;
+          }
+          const current = (data.viewerCount as number | undefined) ?? 0;
+          tx.update(ref, {
+            viewerCount: current + 1,
+            lastWebhookAt: new Date().toISOString(),
+          });
         });
         break;
       }
@@ -166,11 +205,20 @@ export async function POST(req: NextRequest) {
         // Use a transaction so we can clamp at 0 — viewerCount must
         // never go negative even if LiveKit replays a stale `_left`.
         // We also bail if the doc doesn't exist (out-of-order replay
-        // arriving after `room_finished` already cleared it).
+        // arriving after `room_finished` already cleared it). When
+        // the stream has already ended we still write
+        // `lastWebhookAt` for observability but skip the decrement —
+        // the count is already zeroed by `room_finished` and another
+        // decrement would just churn the doc for nothing.
         await db.runTransaction(async (tx) => {
           const snap = await tx.get(ref);
           if (!snap.exists) return;
-          const current = (snap.data()?.viewerCount as number | undefined) ?? 0;
+          const data = snap.data() ?? {};
+          if (data.status !== "live") {
+            tx.update(ref, { lastWebhookAt: new Date().toISOString() });
+            return;
+          }
+          const current = (data.viewerCount as number | undefined) ?? 0;
           const next = Math.max(0, current - 1);
           tx.update(ref, {
             viewerCount: next,
