@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
+import { assertNotBanned } from "@/lib/bans";
 import { BETA_TOPUP_PACK } from "@/lib/gifts";
 
 export const runtime = "nodejs";
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest) {
       throw new HttpError(403, "billing not yet available — coming in v0.2");
     }
     const user = await requireUser(req);
+    // Don't extend the wallet of a banned account. Otherwise the
+    // ban → topup → spend loop survives the ban: the user maxes out
+    // their balance while suspended and immediately resumes the abuse
+    // when the ban is lifted (or via the gifts/send gate before this
+    // session's PR landed).
+    await assertNotBanned(user.uid);
     const db = adminFirestore();
     const walletRef = db.collection("wallets").doc(user.uid);
 
