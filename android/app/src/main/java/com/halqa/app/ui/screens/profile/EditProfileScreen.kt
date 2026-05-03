@@ -38,6 +38,7 @@ import androidx.navigation.NavController
 import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.UserRepository
 import com.halqa.app.data.remote.UpdateProfileRequest
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.components.HalqaTextField
@@ -158,7 +159,7 @@ fun EditProfileScreen(navController: NavController) {
                             navController.popBackStack()
                         } catch (t: Throwable) {
                             saving = false
-                            feedback = "تعذّر الحفظ: ${t.message ?: "خطأ غير معروف"}"
+                            feedback = "تعذّر الحفظ: ${t.humanize()}"
                         }
                     }
                 },

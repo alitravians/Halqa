@@ -4,6 +4,7 @@ import android.content.Context
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.LiveKitTokenRequest
+import com.halqa.app.data.remote.humanize
 import io.livekit.android.ConnectOptions
 import io.livekit.android.LiveKit
 import io.livekit.android.RoomOptions
@@ -148,7 +149,10 @@ object WatchSession {
                 // Superseded by another start() — leave state to the caller.
             } catch (t: Throwable) {
                 cleanup()
-                _state.value = WatchState.Failed(streamId, t.message ?: "تعذّر الانضمام للبث")
+                _state.value = WatchState.Failed(
+                    streamId,
+                    t.humanize(fallback = "تعذّر الانضمام للبث"),
+                )
             }
         }
     }

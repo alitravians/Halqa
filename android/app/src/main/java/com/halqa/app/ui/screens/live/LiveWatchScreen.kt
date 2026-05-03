@@ -57,6 +57,7 @@ import com.halqa.app.data.GiftRepository
 import com.halqa.app.data.MockData
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.GiftDto
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.livekit.HalqaVideoRenderer
 import kotlinx.coroutines.launch
 import com.halqa.app.livekit.WatchSession
@@ -213,7 +214,7 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                             // StreamsRepository.observe (M1 SSoT).
                             showGifts = false
                         }.onFailure { t ->
-                            giftError = t.message ?: "تعذّر إرسال الهدية"
+                            giftError = t.humanize(fallback = "تعذّر إرسال الهدية")
                         }
                     }
                 },

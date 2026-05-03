@@ -39,6 +39,7 @@ import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.KycSubmitRequest
 import com.halqa.app.data.remote.KycStatusDto
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.ui.components.GoldButton
 import com.halqa.app.ui.components.HalqaTextField
 import com.halqa.app.ui.theme.HalqaColors
@@ -261,7 +262,7 @@ private fun SubmitForm() {
                     feedback = "تم إرسال طلبك. ستظهر الحالة \"قيد المراجعة\" خلال ثوانٍ."
                 } catch (t: Throwable) {
                     submitting = false
-                    feedback = "تعذّر الإرسال: ${t.message ?: "خطأ غير معروف"}"
+                    feedback = "تعذّر الإرسال: ${t.humanize()}"
                 }
             }
         },

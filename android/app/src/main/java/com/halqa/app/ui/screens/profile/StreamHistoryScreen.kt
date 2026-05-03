@@ -33,6 +33,7 @@ import androidx.navigation.NavController
 import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.AuditEntryDto
+import com.halqa.app.data.remote.humanize
 import com.halqa.app.ui.theme.HalqaColors
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -66,7 +67,7 @@ fun StreamHistoryScreen(navController: NavController) {
             error = null
         } catch (t: Throwable) {
             entries = emptyList()
-            error = "تعذّر جلب السجل: ${t.message ?: "خطأ"}"
+            error = "تعذّر جلب السجل: ${t.humanize()}"
         }
     }
 
