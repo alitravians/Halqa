@@ -75,15 +75,33 @@ export async function POST(req: NextRequest) {
         { merge: true }
       );
 
-      // Audit record.
-      const auditRef = db.collection("topups").doc();
+      // Audit record. Lands in /audit_log alongside every other
+      // server-recorded action (kyc_submit, profile_update,
+      // stream_start, stream_end, …) so the staff audit endpoint
+      // (`GET /api/audit/[uid]`) returns a complete user history with
+      // a single query. The previous implementation wrote into a
+      // separate `/topups` collection that:
+      //   - had no Firestore rule (default-deny → staff couldn't even
+      //     read it via the SDK; only Admin SDK could),
+      //   - was never read by anything in the codebase (audit/[uid]
+      //     queries `/audit_log` only, no UI surface for /topups),
+      //   - left wallet top-ups invisible during incident response —
+      //     a staff member chasing "why does this user have 50000
+      //     coins" couldn't reconstruct the grant history without
+      //     dropping into the Firebase Console.
+      // Putting the entry in /audit_log also matches the format
+      // (`userId / action / timestamp / metadata`) every other
+      // audit-aware endpoint already uses.
+      const auditRef = db.collection("audit_log").doc();
       tx.set(auditRef, {
-        txnId: auditRef.id,
-        uid: user.uid,
-        packId: BETA_TOPUP_PACK.id,
-        coinsCredited: BETA_TOPUP_PACK.coins,
-        source: "beta_grant",
-        createdAt: FieldValue.serverTimestamp(),
+        userId: user.uid,
+        action: "wallet_topup",
+        timestamp: new Date().toISOString(),
+        metadata: {
+          packId: BETA_TOPUP_PACK.id,
+          coinsCredited: BETA_TOPUP_PACK.coins,
+          source: "beta_grant",
+        },
       });
 
       return { newCoins };
