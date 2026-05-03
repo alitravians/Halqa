@@ -20,7 +20,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.components.PrimaryButton
 import com.halqa.app.ui.components.TextLinkButton
@@ -77,13 +76,13 @@ fun AuthScreen(navController: NavController) {
                 text = "المتابعة بالبريد",
                 onClick = { navController.navigate(Routes.EmailAuth) },
             )
-            Spacer(Modifier.height(12.dp))
-            GhostButton(
-                text = "المتابعة برقم الجوال",
-                onClick = { navController.navigate(Routes.PhoneAuth) },
-            )
 
-            // Note on omitted entry points (deferred — see PR #13):
+            // Single auth entry point for closed beta:
+            //  - Phone OTP: removed in M0 — partially-wired Firebase Phone
+            //    flow caused users to land on Main as a phantom guest;
+            //    Layla also flagged it as a KYC blocker for SA carriers.
+            //    Apple Sign-in replaces it in v0.2 once Apple Developer
+            //    membership is provisioned.
             //  - "المتابعة بـ Google" requires Google Sign-In provider to be
             //    enabled in Firebase Console + an OAuth client ID baked into
             //    google-services.json. Re-enable once provisioned.

@@ -16,10 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.HistoryEdu
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -85,7 +85,7 @@ private fun StaffHomeContent(navController: NavController) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { navController.popBackStack() }) {
                 Icon(
-                    Icons.Filled.ArrowBack,
+                    Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "رجوع",
                     tint = HalqaColors.Text,
                 )
@@ -109,7 +109,7 @@ private fun StaffHomeContent(navController: NavController) {
                 },
             ) {
                 Icon(
-                    Icons.Filled.Logout,
+                    Icons.AutoMirrored.Filled.Logout,
                     contentDescription = "تسجيل خروج",
                     tint = HalqaColors.TextMuted,
                 )

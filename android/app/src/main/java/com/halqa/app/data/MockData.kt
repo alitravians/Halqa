@@ -129,10 +129,4 @@ object MockData {
         PkMode("factions", "حرب الفصائل", "نار، ماء، أرض، هواء — أسبوعي", "🔥", false),
         PkMode("boss", "معركة الزعيم", "حدث يومي تعاوني للمنصة كلها", "🐉", false),
     )
-
-    /**
-     * Empty by design: real chat is delivered through the LiveKit data
-     * channel + Firestore once the stream pipeline is wired end-to-end.
-     */
-    fun chatMessages(): List<ChatMsg> = emptyList()
 }

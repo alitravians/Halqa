@@ -47,8 +47,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.halqa.app.data.ChatMsg
+import com.halqa.app.data.ChatRepository
 import com.halqa.app.data.Gift
 import com.halqa.app.data.MockData
 import com.halqa.app.livekit.HalqaVideoRenderer
@@ -93,7 +95,8 @@ private fun StreamUnavailable(onBack: () -> Unit) {
 fun LiveWatchScreen(streamId: String, navController: NavController) {
     val context = LocalContext.current
     val state by WatchSession.state.collectAsState()
-    val messages = MockData.chatMessages() // TODO replace with Firestore chat subcollection
+    val messages by ChatRepository.observe(streamId)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     var showGifts by remember { mutableStateOf(false) }
 
     DisposableEffect(streamId) {
