@@ -60,10 +60,42 @@ object WatchSession {
     val activeRoom: Room? get() = room
 
     fun start(appContext: Context, streamId: String, ownerUid: String?) {
+        // Bump the generation BEFORE cleanup() — same ordering as
+        // [stop] (line ~165) and [BroadcastSession.start] (line ~113).
+        //
+        // Why this matters: cleanup() cancels the old connect coroutine
+        // but cancellation is only observable at suspend points. Between
+        // a passing supersede gen check and the next suspend, the old
+        // coroutine runs synchronous code that includes
+        //   `room = newRoom`   (line 89)
+        // and then a [Room.connect] call (line 94) which is a real
+        // suspend. If we cleanup() FIRST and bump gen LATER, the old
+        // coroutine can:
+        //   1. Read `gen != sessionGen.get()` at line 77/83, see its
+        //      captured gen still matches (because we haven't bumped),
+        //      pass the supersede check.
+        //   2. Allocate `newRoom` via `LiveKit.create(...)` (sync
+        //      RTC factory allocation, no suspends — verified against
+        //      io.livekit.android source).
+        //   3. Suspend at line 94 (`newRoom.connect`).
+        //   4. Observe the cancellation flag, throw
+        //      [CancellationException], jump to the catch on line 148
+        //      which intentionally does NOTHING (so it doesn't clobber
+        //      state set by the new caller).
+        // Result: `newRoom` is orphaned. RTC factory + camera/mic
+        // resources held until the JVM finalises the Room — which on
+        // mobile is "never" until process death. Trivially reproducible
+        // by tapping streams in the feed faster than the publisher-token
+        // RTT (~300ms on cellular).
+        //
+        // With gen bumped FIRST, the old coroutine's NEXT supersede
+        // check fails (its captured gen no longer matches), it
+        // releases its own `newRoom`, and we never reach the leaky
+        // window.
+        val gen = sessionGen.incrementAndGet()
         cleanup()
         _state.value = WatchState.Connecting(streamId)
 
-        val gen = sessionGen.incrementAndGet()
         connectJob = scope.launch {
             try {
                 val tokenResp = withContext(Dispatchers.IO) {
