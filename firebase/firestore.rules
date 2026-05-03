@@ -160,14 +160,19 @@ service cloud.firestore {
       allow delete: if false;
 
       // -------- /streams/{streamId}/chat/{messageId} (subcollection) --------
-      // Real-time chat written server-side via POST /api/streams/{id}/chat
-      // (Admin SDK bypasses these rules). Clients only read — every signed-
-      // in user can subscribe to a stream's chat while watching it. Writes
-      // are denied so we keep moderation, ban-gating, and profanity
-      // filtering authoritative on the backend.
+      // Read-only from the client; writes are denied. There is currently NO
+      // backend write path — `POST /api/streams/{id}/chat` does not exist
+      // (verify: `ls backend/src/app/api/streams/`). Until that endpoint
+      // ships through the Admin SDK with ban-gate + profanity filter +
+      // /audit_log integration, the chat subcollection stays empty for
+      // every stream and `ChatRepository.observe()` always emits an empty
+      // list. The deny rule is kept (rather than relaxed to authed write)
+      // because relaxing it would re-introduce the moderation-bypass class
+      // closed by PR #53 (gate gifts/wallet against bans) for any future
+      // chat-spam attack.
       match /chat/{messageId} {
         allow read: if isSignedIn();
-        allow write: if false; // server-only via Admin SDK
+        allow write: if false; // server-only via Admin SDK (endpoint TBD)
       }
 
       // -------- /streams/{streamId}/gifts/{giftId} (subcollection) --------
