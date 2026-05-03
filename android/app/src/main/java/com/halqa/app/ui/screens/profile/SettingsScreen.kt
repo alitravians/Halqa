@@ -127,11 +127,18 @@ fun SettingsScreen(navController: NavController) {
             onChange = { v -> mutate { it.copy(privacyShowOnline = v) } },
         )
         SectionLabel("من يستطيع مراسلتي")
+        // The backend's authoritative allow-list in `settings/route.ts:77`
+        // is `["everyone", "followers", "none"]`. The Android UI was
+        // sending the key "nobody" for "لا أحد", which the backend
+        // rejected as `400 "privacyAllowMessages invalid."` — every user
+        // who picked "لا أحد" silently failed to save with an English
+        // error surfaced via `humanize()`. Use "none" to match the
+        // backend.
         SegmentedRow(
             options = listOf(
                 "everyone" to "الجميع",
                 "followers" to "متابعيني",
-                "nobody" to "لا أحد",
+                "none" to "لا أحد",
             ),
             selected = working.privacyAllowMessages,
             onSelect = { v -> mutate { it.copy(privacyAllowMessages = v) } },
