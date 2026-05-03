@@ -1,6 +1,10 @@
 import { NextRequest } from "next/server";
 import { WebhookReceiver } from "livekit-server-sdk";
-import { FieldValue } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  type DocumentReference,
+  type UpdateData,
+} from "firebase-admin/firestore";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError } from "@/lib/auth";
 
@@ -59,26 +63,33 @@ export async function POST(req: NextRequest) {
 
     switch (event.event) {
       case "room_started": {
-        // Make sure the document exists and viewerCount starts at 0.
-        // Don't overwrite existing fields — `livekit/token` already
-        // populated ownerUid/title/etc when it was created.
-        await ref.set(
-          { viewerCount: 0, lastWebhookAt: new Date().toISOString() },
-          { merge: true }
-        );
+        // Track the event timestamp for observability. Do NOT touch
+        // viewerCount — the doc was already created by `livekit/token`
+        // with viewerCount=0, and LiveKit Cloud does NOT guarantee
+        // ordered delivery of webhooks. A `room_started` arriving
+        // after an early `participant_joined` (e.g. when the publisher
+        // and the first viewer connect within the same Vercel cold-
+        // start window) used to clobber the increment back to 0,
+        // making the broadcaster see a stuck "0 watching" overlay
+        // even though the audience was real.
+        await tryWebhookUpdate(ref, {
+          lastWebhookAt: new Date().toISOString(),
+        });
         break;
       }
 
       case "room_finished": {
-        await ref.set(
-          {
-            status: "ended",
-            endTime: new Date().toISOString(),
-            viewerCount: 0,
-            lastWebhookAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
+        // Doc *should* exist (token route created it); if it doesn't,
+        // the stream was never properly started and there's nothing
+        // for us to flip to "ended". Refusing to upsert here prevents
+        // partial-doc creation that the Android client treats as a
+        // broken stream (no ownerUid → WatchSession aborts).
+        await tryWebhookUpdate(ref, {
+          status: "ended",
+          endTime: new Date().toISOString(),
+          viewerCount: 0,
+          lastWebhookAt: new Date().toISOString(),
+        });
         break;
       }
 
@@ -88,13 +99,10 @@ export async function POST(req: NextRequest) {
           // Publisher's own join — don't count as a viewer.
           break;
         }
-        await ref.set(
-          {
-            viewerCount: FieldValue.increment(1),
-            lastWebhookAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
+        await tryWebhookUpdate(ref, {
+          viewerCount: FieldValue.increment(1),
+          lastWebhookAt: new Date().toISOString(),
+        });
         break;
       }
 
@@ -105,18 +113,17 @@ export async function POST(req: NextRequest) {
         }
         // Use a transaction so we can clamp at 0 — viewerCount must
         // never go negative even if LiveKit replays a stale `_left`.
+        // We also bail if the doc doesn't exist (out-of-order replay
+        // arriving after `room_finished` already cleared it).
         await db.runTransaction(async (tx) => {
           const snap = await tx.get(ref);
+          if (!snap.exists) return;
           const current = (snap.data()?.viewerCount as number | undefined) ?? 0;
           const next = Math.max(0, current - 1);
-          tx.set(
-            ref,
-            {
-              viewerCount: next,
-              lastWebhookAt: new Date().toISOString(),
-            },
-            { merge: true }
-          );
+          tx.update(ref, {
+            viewerCount: next,
+            lastWebhookAt: new Date().toISOString(),
+          });
         });
         break;
       }
@@ -131,6 +138,33 @@ export async function POST(req: NextRequest) {
     return asJson(200, { ok: true, event: event.event });
   } catch (err) {
     return asError(err);
+  }
+}
+
+/**
+ * `update()` against a non-existent doc throws NOT_FOUND. We treat
+ * that as the doc-not-yet-created race (LiveKit webhook beat the
+ * `livekit/token` create on a cold-start Vercel function) and silently
+ * drop the event — recreating a partial doc with only webhook fields
+ * would leave the Android client with a broken stream record (no
+ * ownerUid/title), which is strictly worse than missing one viewer
+ * count tick that the next event will replace.
+ *
+ * Any other Firestore error is re-thrown so the route returns 5xx and
+ * LiveKit's at-least-once delivery retries it.
+ */
+async function tryWebhookUpdate(
+  ref: DocumentReference,
+  data: UpdateData<Record<string, unknown>>
+): Promise<void> {
+  try {
+    await ref.update(data);
+  } catch (err) {
+    const code = (err as { code?: number | string }).code;
+    // NOT_FOUND is gRPC code 5; firestore-admin sometimes surfaces it
+    // as the string literal "not-found" too.
+    if (code === 5 || code === "not-found") return;
+    throw err;
   }
 }
 
