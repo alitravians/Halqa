@@ -22,6 +22,12 @@ object ApiClient {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(AuthInterceptor())
+            // Recover from a 401 by force-refreshing the Firebase ID token and
+            // retrying once. Without this, a token that gets revoked server-
+            // side (admin force-signout, password reset, signing-key rotation)
+            // keeps failing locally for up to ~1 hour because [AuthInterceptor]
+            // uses the cached token. See [AuthAuthenticator] for the contract.
+            .authenticator(AuthAuthenticator())
         if (BuildConfig.DEBUG) {
             builder.addInterceptor(
                 HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
