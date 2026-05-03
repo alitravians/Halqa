@@ -236,6 +236,47 @@ service cloud.firestore {
       allow write: if false; // server only via Admin SDK
     }
 
+    // -------- /audit/{userId}/events/{eventId} (per-user durable audit) --------
+    // Layla's T&S guardrail GR2. The Android client writes a single
+    // `kyc_bypass_granted` event to this collection on first sign-in
+    // when the closed-beta KYC bypass is active (see
+    // [com.halqa.app.data.UserDocBootstrap]). The trail is intentionally
+    // SEPARATE from `/users/{uid}.bypass_grant` so that even if the user
+    // doc is later edited or deleted, the audit survives in its own
+    // collection — which is the whole point of an audit log.
+    //
+    // Why a top-level `/audit/{uid}/events` rather than the existing
+    // `/users/{uid}/audit/{id}` subcollection? The existing per-user
+    // audit subcoll is server-only-write (Admin SDK gated; line ~101);
+    // relaxing it to allow client writes for ANY entry would risk a
+    // user planting forged moderator-action audit entries. Carving out
+    // a NEW collection with a narrow rule (`type` is a constrained
+    // string, `uid` must match the path, no updates, no deletes) gives
+    // us the client-write capability we need for the bypass-grant event
+    // without weakening the existing locked-down audit subcoll.
+    //
+    // Constraints (defence in depth — if any of these are violated, the
+    // rule rejects, the audit row is missing, and the user-doc-side
+    // `bypass_grant` field is still authoritative for the withdrawal
+    // gate so we don't lose the safety property):
+    //   - owner can create only their own events (`isOwner(userId)`),
+    //   - `uid` field MUST match the path segment (no impersonation),
+    //   - `type` is a string with `size <= 64` (defeats doc-bloat DoS,
+    //     same class as PR #54 streamTitle / #58 KYC fullName cap),
+    //   - update + delete forbidden (append-only audit).
+    //
+    // Reads: owner can see their own audit, staff can read everyone's
+    // for incident investigation. No public read.
+    match /audit/{userId}/events/{eventId} {
+      allow read: if isOwner(userId) || isStaff();
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.type is string
+        && request.resource.data.type.size() <= 64;
+      allow update: if false;
+      allow delete: if false;
+    }
+
     // -------- /staff_actions/{id} --------
     // Closed-create. Staff actions (warn / mute / ban / kick) MUST go
     // through a server-side backend endpoint that uses the Admin SDK,
