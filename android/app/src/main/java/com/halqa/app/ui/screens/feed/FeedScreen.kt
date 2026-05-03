@@ -47,6 +47,7 @@ import com.halqa.app.data.StreamPreview
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.HalqaLogo
+import com.halqa.app.ui.components.avatarInitial
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
@@ -73,10 +74,20 @@ fun FeedScreen(navController: NavController) {
 
     val previews = remember(liveStreams) {
         liveStreams.mapIndexed { idx, s ->
+            // The stream title is the closest user-typed string we have for
+            // the host's display name on the feed grid. It can legitimately
+            // be empty for legacy documents (created before the backend
+            // started defaulting `title` to "بث جديد"), or for any stream
+            // whose title starts with a space (`substringBefore(' ')` then
+            // collapses to ""). Fall back to the start of the owner uid so
+            // the row always renders something deterministic instead of
+            // throwing inside the avatar.
+            val derivedHost = s.title.substringBefore(" ").take(20).trim()
+            val safeHost = derivedHost.ifEmpty { s.ownerUid.take(8) }.ifEmpty { "مضيف" }
             StreamPreview(
                 id = s.streamId,
-                title = s.title,
-                hostName = s.title.substringBefore(" ").take(20),
+                title = s.title.ifBlank { "بث جديد" },
+                hostName = safeHost,
                 hostHandle = s.ownerUid.take(8),
                 avatarSeed = (s.ownerUid.hashCode() and 0x7fffffff) % 360,
                 viewers = s.viewerCount,
@@ -270,7 +281,7 @@ fun StreamCard(stream: StreamPreview, onClick: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        stream.hostName.first().toString(),
+                        avatarInitial(stream.hostName),
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.halqa.app.data.MockData
+import com.halqa.app.ui.components.avatarInitial
 import com.halqa.app.ui.theme.HalqaColors
 import kotlin.math.cos
 import kotlin.math.sin
@@ -198,7 +199,7 @@ private fun AvatarFighter(name: String, hp: Float, color1: Color, color2: Color,
                 .border(3.dp, color1, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(name.first().toString(), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            Text(avatarInitial(name), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(6.dp))
         Text(name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)

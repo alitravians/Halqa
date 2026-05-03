@@ -62,6 +62,7 @@ import kotlinx.coroutines.launch
 import com.halqa.app.livekit.WatchSession
 import com.halqa.app.livekit.WatchState
 import com.halqa.app.ui.components.GlassCard
+import com.halqa.app.ui.components.avatarInitial
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 
@@ -134,7 +135,12 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     }
 
     val watching = state as? WatchState.Watching
-    val hostHandle = watching?.ownerUid?.take(8) ?: streamId.take(8)
+    // Avatar initial is rendered from this string; defend against the
+    // worst case (deep link with an empty streamId, owner uid blanked
+    // server-side) so we never feed an empty string into the renderer.
+    val hostHandle = watching?.ownerUid?.take(8)?.takeIf { it.isNotBlank() }
+        ?: streamId.take(8).takeIf { it.isNotBlank() }
+        ?: "مضيف"
 
     Box(
         modifier = Modifier
@@ -270,7 +276,7 @@ private fun StreamHeader(
                 .background(Brush.linearGradient(listOf(HalqaColors.Brand, HalqaColors.Pink))),
             contentAlignment = Alignment.Center,
         ) {
-            Text(hostName.first().toString(), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(avatarInitial(hostName), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -322,7 +328,7 @@ private fun StreamContent(hostName: String) {
                     .background(Brush.linearGradient(listOf(HalqaColors.Brand, HalqaColors.Pink))),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(hostName.first().toString(), fontSize = 44.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                Text(avatarInitial(hostName), fontSize = 44.sp, color = Color.White, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(12.dp))
             Text("🔴 بث مباشر", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)

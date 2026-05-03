@@ -53,6 +53,7 @@ import com.halqa.app.ui.components.BadgePill
 import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.GhostButton
 import com.halqa.app.ui.components.GoldButton
+import com.halqa.app.ui.components.avatarInitial
 import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 import kotlinx.coroutines.launch
@@ -108,7 +109,7 @@ fun ProfileScreen(navController: NavController) {
                         .border(3.dp, HalqaColors.Bg, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(user.displayName.first().toString(), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                    Text(avatarInitial(user.displayName), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.size(12.dp))
                 Column(modifier = Modifier.padding(top = 40.dp)) {
