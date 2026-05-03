@@ -68,7 +68,29 @@ export async function POST(req: NextRequest) {
       }
 
       const now = new Date().toISOString();
-      tx.update(ref, { status: "ended", endTime: now });
+      // Zero `viewerCount` alongside the status flip. Two reasons:
+      //
+      //   1. The LiveKit `room_finished` webhook handler (the other
+      //      lifecycle path that closes a stream) already writes
+      //      `viewerCount: 0` in the same txn that flips status to
+      //      "ended", so without zeroing here the two paths leave
+      //      Firestore in subtly different states — publisher-
+      //      initiated ends keep whatever value `viewerCount` happened
+      //      to be at when the publisher tapped end (often >0 — there
+      //      were live viewers!), while empty-timeout ends correctly
+      //      land at 0. Downstream consumers (StreamHistoryScreen,
+      //      LiveBroadcastService notification, post-stream summary)
+      //      then surface a phantom non-zero count for streams ended
+      //      via the publisher tap.
+      //
+      //   2. With the `participant_left`/`participant_joined` status
+      //      gate (PR #55) the late `_left` events that LiveKit
+      //      delivers AFTER the room actually empties are now silently
+      //      dropped — they used to drain the count to 0 via late
+      //      decrements, masking this bug. With the gate in place the
+      //      stale value is permanent until we explicitly clear it
+      //      here.
+      tx.update(ref, { status: "ended", endTime: now, viewerCount: 0 });
       const auditRef = db.collection("audit_log").doc();
       tx.set(auditRef, {
         userId: user.uid,
