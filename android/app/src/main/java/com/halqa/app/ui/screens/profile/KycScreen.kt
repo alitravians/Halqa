@@ -238,12 +238,20 @@ private fun SubmitForm() {
         text = if (submitting) "يرسل..." else "إرسال للمراجعة",
         onClick = {
             if (submitting) return@GoldButton
-            if (fullName.trim().length < 4) {
-                feedback = "أدخل الاسم الكامل."
+            // Match the backend's authoritative bounds in `kyc/submit/route.ts`
+            // exactly: fullName.trim() >= 3, documentNumber.trim() >= 4. The
+            // Android UI was previously stricter (`< 4` and `< 5`), which
+            // silently locked out legitimate 3-character Arabic names
+            // ("علي", "تيم", "عمر") and 4-digit document numbers — the user
+            // saw a useless "أدخل الاسم الكامل" message that didn't
+            // explain the actual minimum, which the backend would have
+            // accepted anyway.
+            if (fullName.trim().length < 3) {
+                feedback = "الاسم الكامل يجب أن يكون 3 أحرف على الأقل."
                 return@GoldButton
             }
-            if (documentNumber.trim().length < 5) {
-                feedback = "رقم الوثيقة غير صالح."
+            if (documentNumber.trim().length < 4) {
+                feedback = "رقم الوثيقة يجب أن يكون 4 خانات على الأقل."
                 return@GoldButton
             }
             feedback = null
