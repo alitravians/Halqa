@@ -2,15 +2,22 @@ rules_version = '2';
 
 // Halqa Firestore security rules — PDPL-compliant.
 // Schema overview:
-//   /users/{uid}                  user-owned profile, role mutable only by staff+
-//   /users/{uid}/settings/{doc}   user-owned settings (private)
-//   /kyc_submissions/{uid}        user creates own, immutable except for status (staff)
-//   /streams/{streamId}           anyone authenticated can read live, owner writes
-//   /audit_log/{id}               server-only writes; user reads own; staff reads all
-//   /staff_actions/{id}           staff writes, admin deletes, owner reads own targeting
-//   /bans/{banId}                 server-only writes; user reads own
+//   /users/{uid}                            user-owned profile, role mutable only by staff+
+//   /users/{uid}/settings/{doc}             user-owned settings (private)
+//   /users/{uid}/audit/{id}                 per-user audit log; server writes
+//   /users/{uid}/giftBlocklist/{senderUid}  host-owned read+write; server reads in gift txn
+//   /kyc_submissions/{uid}                  user creates own, immutable except for status (staff)
+//   /streams/{streamId}                     anyone authenticated can read live, server-only writes
+//   /streams/{streamId}/chat/{messageId}    signed-in read; server-only writes (moderation gate)
+//   /streams/{streamId}/gifts/{giftId}      sender + host + staff read; server-only writes
+//   /wallets/{uid}                          owner + staff read; server-only writes
+//   /audit_log/{id}                         server-only writes; staff reads all
+//   /staff_actions/{id}                     staff writes, admin deletes, owner reads own targeting
+//   /bans/{banId}                           server-only writes; user reads own
 //
 // All writes require authentication. Public reads are scoped to live streams only.
+// Default-deny is in effect: any collection NOT listed here is unreadable + unwritable
+// from the client. Server-side Admin SDK calls bypass these rules entirely.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -84,6 +91,23 @@ service cloud.firestore {
         allow read: if isOwner(userId) || isStaff();
         allow write: if false; // server only via Admin SDK
       }
+
+      // -------- /users/{uid}/giftBlocklist/{senderUid} --------
+      // Host-managed blocklist that prevents a specific sender from
+      // gifting them. The backend gift-send route reads this inside
+      // the gift transaction (assertNotBlockedFromGifting in
+      // gift-rate-limit.ts) so the host's block flips effective
+      // immediately even when a gift is in flight.
+      //
+      // The host owns the list — they read + write entries from
+      // their stream UI. The doc body is opaque (any document
+      // presence blocks the sender, regardless of contents). Staff
+      // can read for moderation visibility but cannot bypass the
+      // host's intent by writing.
+      match /giftBlocklist/{senderUid} {
+        allow read: if isOwner(userId) || isStaff();
+        allow write: if isOwner(userId);
+      }
     }
 
     // -------- /kyc_submissions/{uid} --------
@@ -123,6 +147,50 @@ service cloud.firestore {
       allow create: if false;
       allow update: if false;
       allow delete: if false;
+
+      // -------- /streams/{streamId}/chat/{messageId} (subcollection) --------
+      // Real-time chat written server-side via POST /api/streams/{id}/chat
+      // (Admin SDK bypasses these rules). Clients only read — every signed-
+      // in user can subscribe to a stream's chat while watching it. Writes
+      // are denied so we keep moderation, ban-gating, and profanity
+      // filtering authoritative on the backend.
+      match /chat/{messageId} {
+        allow read: if isSignedIn();
+        allow write: if false; // server-only via Admin SDK
+      }
+
+      // -------- /streams/{streamId}/gifts/{giftId} (subcollection) --------
+      // Per-stream gift transaction log. Written by /api/gifts/send via
+      // Admin SDK inside the same Firestore transaction that debits the
+      // sender wallet and credits the host wallet. Used by:
+      //   - the gift-rate-limit module (server-side cooldown read), and
+      //   - moderators investigating gift-fraud reports.
+      // Hosts and senders both have legitimate reasons to see "what was
+      // sent in my stream" / "what did I send" UIs in the future, so we
+      // allow the host (resource.data.recipientUid == uid()) and the
+      // sender (resource.data.senderUid == uid()) to read their own
+      // entries. No client writes — writes go through the gift txn.
+      match /gifts/{giftId} {
+        allow read: if isStaff()
+          || (isSignedIn() && resource.data.recipientUid == uid())
+          || (isSignedIn() && resource.data.senderUid == uid());
+        allow write: if false; // server-only via Admin SDK
+      }
+    }
+
+    // -------- /wallets/{uid} --------
+    // Per-user wallet (coins + diamonds + lifetime counters). Reads are
+    // direct from the Android client (real-time balance updates) and so
+    // need an explicit allow — without it, every wallet observe() call
+    // hits PERMISSION_DENIED and the UI silently shows a zeroed snapshot
+    // courtesy of WalletRepository's error fallback.
+    //
+    // Writes are server-only: every coin/diamond delta MUST go through
+    // the backend (gift txn, top-up, withdrawal) so audit_log + atomic
+    // counters stay correct. The Android client never writes here.
+    match /wallets/{userId} {
+      allow read: if isOwner(userId) || isStaff();
+      allow write: if false; // server-only via Admin SDK
     }
 
     // -------- /audit_log/{id} (system audit log) --------
