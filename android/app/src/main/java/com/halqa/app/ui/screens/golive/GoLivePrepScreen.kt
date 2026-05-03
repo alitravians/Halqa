@@ -28,8 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.ChildCare
 import androidx.compose.material.icons.filled.Gavel
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -37,7 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,9 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -275,22 +270,22 @@ fun GoLivePrepScreen(navController: NavController) {
             }
         }
 
-        Spacer(Modifier.height(20.dp))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(HalqaColors.BgElevated)
-                .border(1.dp, HalqaColors.Border, RoundedCornerShape(16.dp))
-                .padding(16.dp),
-        ) {
-            ToggleRow("بث الصوت فقط", icon = Icons.Filled.Mic)
-            Spacer(Modifier.height(8.dp))
-            ToggleRow("السماح بدخول PK", icon = Icons.Filled.SettingsSuggest)
-            Spacer(Modifier.height(8.dp))
-            ToggleRow("الفلاتر التلقائية للشات", icon = Icons.Filled.SettingsSuggest)
-        }
+        // The pre-broadcast options card ("audio-only", "allow PK", "auto chat
+        // filters") was removed because none of those toggles were wired
+        // anywhere — `ToggleRow` kept its `checked` state in private
+        // `remember { mutableStateOf(false) }` and never propagated it. So:
+        //   - "بث الصوت فقط" looked like it disabled the camera, but
+        //     `BroadcastSession.start()` always called `setCameraEnabled(true)`.
+        //     A privacy-adjacent toggle that lies to the user is worse than
+        //     not having the toggle at all.
+        //   - "السماح بدخول PK" did nothing — there is no PK-matchmaking
+        //     server flag yet.
+        //   - "الفلاتر التلقائية للشات" did nothing — chat filtering hasn't
+        //     shipped (chat itself is read-only on the client right now).
+        //
+        // Bring them back when the underlying features ship and the toggle is
+        // actually plumbed through BroadcastSession + /api/livekit/token + the
+        // chat-moderation pipeline.
 
         Spacer(Modifier.height(20.dp))
 
@@ -461,42 +456,6 @@ private fun ReminderLine(icon: ImageVector, text: String) {
         Icon(icon, contentDescription = null, tint = HalqaColors.Warning, modifier = Modifier.size(16.dp))
         Spacer(Modifier.size(8.dp))
         Text(text, color = HalqaColors.Text, fontSize = 12.sp, lineHeight = 20.sp)
-    }
-}
-
-@Composable
-private fun ToggleRow(label: String, icon: ImageVector) {
-    var checked by remember { mutableStateOf(false) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { checked = !checked },
-    ) {
-        Icon(icon, contentDescription = null, tint = HalqaColors.TextMuted)
-        Spacer(Modifier.size(12.dp))
-        Text(label, color = HalqaColors.Text, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        // Force LTR for the toggle knob alignment. The whole app forces RTL
-        // globally (MainActivity), which would otherwise flip CenterStart /
-        // CenterEnd and place the knob on the wrong physical side. Material
-        // spec explicitly says switches do not mirror in RTL.
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-            Box(
-                modifier = Modifier
-                    .size(width = 44.dp, height = 24.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (checked) HalqaColors.Brand else Color.White.copy(alpha = 0.12f)),
-                contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(Color.White),
-                )
-            }
-        }
     }
 }
 
