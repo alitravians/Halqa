@@ -5,7 +5,7 @@ import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
 import { assertNotBanned } from "@/lib/bans";
 import { findGift } from "@/lib/gifts";
 import {
-  assertGiftRateOk,
+  assertAndIncrementGiftRate,
   assertNotBlockedFromGifting,
 } from "@/lib/gift-rate-limit";
 
@@ -73,12 +73,6 @@ export async function POST(req: NextRequest) {
     const totalCoins = gift.priceCoins * count;
     const totalDiamonds = gift.yieldDiamonds * count;
 
-    // Pre-transaction abuse checks (Mohammed Al-Qahtani — Stream Moderation
-    // Lead). Rate limits + host blocklist run outside the txn because they
-    // read aggregate counts; the small race window (<200ms) is acceptable
-    // for closed-beta scale and avoids inflating the txn surface.
-    await assertGiftRateOk(streamId, sender.uid);
-
     const db = adminFirestore();
     const senderWalletRef = db.collection("wallets").doc(sender.uid);
     const streamRef = db.collection("streams").doc(streamId);
@@ -111,6 +105,16 @@ export async function POST(req: NextRequest) {
       // snapshot and the gift would land anyway. See
       // `assertNotBlockedFromGifting` for the contract.
       await assertNotBlockedFromGifting(ownerUid, sender.uid, tx);
+
+      // Per-(streamId, senderUid) rate-limit check + counter bump.
+      // MUST be called inside the txn before any tx.set so the read
+      // participates in the txn snapshot and the increment commits
+      // atomically with the wallet debit. Earlier versions ran an
+      // aggregate `count()` query outside the txn — 5+ concurrent
+      // requests all read count=0 and bypassed the cap. See the
+      // module-level docstring on `gift-rate-limit.ts` for the full
+      // story.
+      await assertAndIncrementGiftRate(streamId, sender.uid, tx);
 
       const senderCoins = senderWalletSnap.exists
         ? Number(senderWalletSnap.data()?.coins ?? 0)
@@ -161,8 +165,10 @@ export async function POST(req: NextRequest) {
 
       // Audit record. Immutable, never overwritten. Stream-scoped
       // subcollection — drives stream summary UI ("X diamonds in this
-      // stream", per-stream leaderboards) and the rate-limit count
-      // queries in `gift-rate-limit.ts`.
+      // stream", per-stream leaderboards). The rate-limit module no
+      // longer queries this collection; rate state lives in the
+      // per-(stream,sender) counter doc at
+      // streams/{streamId}/giftRateCounters/{senderUid}.
       tx.set(giftAuditRef, {
         txnId: giftAuditRef.id,
         streamId,
