@@ -159,7 +159,10 @@ export async function POST(req: NextRequest) {
         { merge: true }
       );
 
-      // Audit record. Immutable, never overwritten.
+      // Audit record. Immutable, never overwritten. Stream-scoped
+      // subcollection — drives stream summary UI ("X diamonds in this
+      // stream", per-stream leaderboards) and the rate-limit count
+      // queries in `gift-rate-limit.ts`.
       tx.set(giftAuditRef, {
         txnId: giftAuditRef.id,
         streamId,
@@ -174,6 +177,56 @@ export async function POST(req: NextRequest) {
         totalCoins,
         totalDiamonds,
         createdAt: FieldValue.serverTimestamp(),
+      });
+
+      // User-scoped audit entries. The streams/{streamId}/gifts/
+      // subcollection above is great for stream-scoped queries, but
+      // the staff-facing `GET /api/audit/[uid]` endpoint queries the
+      // root `/audit_log` collection by `userId` — gifts were the
+      // only money-moving action in the system that DID NOT show up
+      // there. A moderator investigating "user X is being harassed
+      // via spam-gifting" or "user Y suddenly has 50,000 diamonds"
+      // had to drop into the Firebase Console manually because
+      // their audit view showed kyc_submit / stream_start /
+      // stream_end / wallet_topup but no gifts.
+      //
+      // We write two entries per gift so each side can be queried by
+      // `userId == uid` in a single Firestore index hit (the existing
+      // composite index on `audit_log (userId ASC, timestamp DESC)`
+      // already covers this). The metadata mirrors the per-stream
+      // record above but flat enough to render in the audit view
+      // without joining back to streams/{streamId}/gifts.
+      const sendAuditRef = db.collection("audit_log").doc();
+      tx.set(sendAuditRef, {
+        userId: sender.uid,
+        action: "gift_send",
+        timestamp: new Date().toISOString(),
+        metadata: {
+          streamId,
+          giftId: gift.id,
+          giftName: gift.name,
+          receiverUid: ownerUid,
+          count,
+          totalCoins,
+          totalDiamonds,
+          txnId: giftAuditRef.id,
+        },
+      });
+      const receiveAuditRef = db.collection("audit_log").doc();
+      tx.set(receiveAuditRef, {
+        userId: ownerUid,
+        action: "gift_receive",
+        timestamp: new Date().toISOString(),
+        metadata: {
+          streamId,
+          giftId: gift.id,
+          giftName: gift.name,
+          senderUid: sender.uid,
+          count,
+          totalCoins,
+          totalDiamonds,
+          txnId: giftAuditRef.id,
+        },
       });
 
       return {
