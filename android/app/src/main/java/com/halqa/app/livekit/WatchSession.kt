@@ -40,7 +40,7 @@ object WatchSession {
     @Volatile private var room: Room? = null
     private var eventsJob: Job? = null
     private var connectJob: Job? = null
-    private var viewerCountJob: Job? = null
+    private var streamObserveJob: Job? = null
 
     /**
      * The active LiveKit [Room], if any. Exposed read-only so the Compose
@@ -86,14 +86,35 @@ object WatchSession {
                     viewerCount = 0,
                 )
 
-                // Authoritative viewer count comes from the backend
-                // (LiveKit webhook → Firestore). See StreamsRepository.
-                viewerCountJob?.cancel()
-                viewerCountJob = scope.launch {
-                    StreamsRepository.viewerCount(streamId).collect { count ->
+                // Subscribe to the full server-side stream document
+                // (SSoT — see [StreamsRepository.observe]). Two reasons:
+                //
+                //   1. Authoritative viewer count comes from the LiveKit
+                //      webhook → Firestore pipeline, not from
+                //      `room.remoteParticipants.size` (which lies on a
+                //      viewer-only client because they're excluded from
+                //      their own count).
+                //
+                //   2. We surface server-driven `status == "ended"`
+                //      transitions immediately. If the host's app crashes
+                //      or loses network, the LiveKit transport may take
+                //      tens of seconds to fire `Disconnected`; the
+                //      Firestore listener fires the moment the backend
+                //      webhook handler runs. Viewers see the "ended"
+                //      screen without staring at a frozen last frame.
+                streamObserveJob?.cancel()
+                streamObserveJob = scope.launch {
+                    StreamsRepository.observe(streamId).collect { snap ->
+                        snap ?: return@collect
                         val cur = _state.value as? WatchState.Watching ?: return@collect
-                        if (cur.streamId == streamId) {
-                            _state.value = cur.copy(viewerCount = count)
+                        if (cur.streamId != streamId) return@collect
+                        if (snap.isEnded) {
+                            cleanup()
+                            _state.value = WatchState.Ended("انتهى البث")
+                            return@collect
+                        }
+                        if (cur.viewerCount != snap.viewerCount) {
+                            _state.value = cur.copy(viewerCount = snap.viewerCount)
                         }
                     }
                 }
@@ -151,6 +172,8 @@ object WatchSession {
         connectJob = null
         eventsJob?.cancel()
         eventsJob = null
+        streamObserveJob?.cancel()
+        streamObserveJob = null
         room?.disconnect()
         room?.release()
         room = null
