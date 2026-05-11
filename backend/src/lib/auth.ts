@@ -105,6 +105,102 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     const hd = typeof data.handle === "string" ? data.handle.trim() : "";
     displayName = dn.length > 0 ? dn : null;
     handle = hd.length > 0 ? hd : null;
+    // LAYLA-002 continuation — backfill `bypass_grant` on existing user
+    // docs that pre-date PR #92.
+    //
+    // Cohorts that land here without `bypass_grant` on an existing doc:
+    //
+    //   1. Users who signed in in v0.1.19 → v0.1.21 (before PR #92
+    //      shipped). The old lazy-create path in this function did NOT
+    //      write `bypass_grant` even when `BYPASS_KYC_FOR_BETA=true`,
+    //      so any user created by the backend in that window has a
+    //      doc that is structurally indistinguishable from a fully
+    //      KYC-verified user — the wallet/withdraw 403 hard-block
+    //      (Layla GR4) keys on `bypass_grant.will_reverify === true`
+    //      and treats `bypass_grant === undefined` as "no grant",
+    //      which silently bypasses GR4 for the entire cohort.
+    //
+    //   2. Tampered clients that minted their own `/users/{uid}` doc
+    //      directly via the Firebase SDK without `bypass_grant`. The
+    //      firestore.rules create predicate (`/users/{uid}` line ~63)
+    //      permits `bypass_grant` to be absent — the rule only enforces
+    //      `will_reverify == true` if the field IS present — so a
+    //      malicious client trivially evades the GR4 stamp on create.
+    //
+    //   3. Returning sign-ins where the original Android-side
+    //      UserDocBootstrap.ensureUserDoc happened to take the Patched
+    //      branch (existing doc + missing fields) without GR1 ever
+    //      having fired — e.g. a doc seeded by some out-of-band staff
+    //      action.
+    //
+    // All three cohorts get the same defense-in-depth backfill below:
+    // we re-detect on every authenticated request whether the bypass
+    // is active AND the doc lacks the grant, and we stamp it
+    // server-side via the Admin SDK (which bypasses the rules
+    // allowlist on /users/{uid} self-update, so this works even on
+    // docs the client is forbidden from touching).
+    //
+    // The single write happens inside a transaction so two concurrent
+    // authed requests can't both stamp + emit duplicate audit rows.
+    // The transaction re-reads, observes the field is now present on
+    // the second runner, and bails. Audit row duplication is the
+    // worst-case if the txn races; even then both rows carry the
+    // same payload and the collection is append-only by rule, so a
+    // dup audit row is a debugging artifact, not a security defect.
+    const bypassActive = process.env.BYPASS_KYC_FOR_BETA === "true";
+    const hasBypassGrant =
+      data.bypass_grant !== undefined && data.bypass_grant !== null;
+    if (bypassActive && !hasBypassGrant) {
+      const db = adminFirestore();
+      try {
+        await db.runTransaction(async (tx) => {
+          const txSnap = await tx.get(userRef);
+          // Re-check inside the txn — another concurrent requireUser
+          // call may have already stamped the field.
+          const txData = txSnap.exists ? txSnap.data() ?? {} : {};
+          if (txData.bypass_grant !== undefined && txData.bypass_grant !== null) {
+            return;
+          }
+          tx.set(
+            userRef,
+            {
+              bypass_grant: {
+                reason: "BETA_M0_BACKEND_BACKFILL",
+                granted_at: new Date().toISOString(),
+                granted_via: "BYPASS_KYC_FOR_BETA",
+                will_reverify: true,
+              },
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+          // Mirror the grant into the independent audit trail (Layla
+          // GR2). Distinct `reason` value so staff incident review
+          // can enumerate the backfilled cohort separately from the
+          // original Android-side / backend-lazy-create cohorts.
+          const auditRef = db
+            .collection("audit")
+            .doc(uid)
+            .collection("events")
+            .doc();
+          tx.set(auditRef, {
+            uid,
+            type: "kyc_bypass_granted",
+            granted_at: new Date().toISOString(),
+            reason: "BETA_M0_BACKEND_BACKFILL",
+            env_flag_value: true,
+          });
+        });
+      } catch {
+        // Backfill is defence-in-depth, not the primary path. A
+        // transient Firestore failure on this txn must NOT prevent
+        // the request from completing — the user is already
+        // authenticated, the role is loaded, and the next authed
+        // call will try again. We swallow rather than 5xx so a
+        // partial Firestore outage doesn't black-hole the whole
+        // backend.
+      }
+    }
   } else {
     // Self-create on first call.
     //
