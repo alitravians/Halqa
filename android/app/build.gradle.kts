@@ -44,6 +44,40 @@ android {
         buildConfigField("Boolean", "BYPASS_KYC_FOR_BETA", "true")
     }
 
+    // Release signing config — env-driven. CI provides:
+    //   HALQA_KEYSTORE_PATH      — absolute path to the release keystore on the runner
+    //   HALQA_KEYSTORE_PASSWORD  — keystore password
+    //   HALQA_KEY_ALIAS          — key alias inside the keystore
+    //   HALQA_KEY_PASSWORD       — alias password
+    // When any of these are absent, the release block falls back to the debug
+    // signing config so `assembleRelease` still produces a buildable (but
+    // dev-signed) artifact for local smoke-tests. Play Console submissions
+    // MUST be built on CI where all 4 vars are populated.
+    val releaseKeystorePath = System.getenv("HALQA_KEYSTORE_PATH")
+    val releaseKeystorePassword = System.getenv("HALQA_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = System.getenv("HALQA_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("HALQA_KEY_PASSWORD")
+    val releaseSigningReady = !releaseKeystorePath.isNullOrBlank() &&
+            !releaseKeystorePassword.isNullOrBlank() &&
+            !releaseKeyAlias.isNullOrBlank() &&
+            !releaseKeyPassword.isNullOrBlank() &&
+            file(releaseKeystorePath!!).exists()
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         debug {
             versionNameSuffix = "-debug"
@@ -53,6 +87,14 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = if (releaseSigningReady) {
+                signingConfigs.getByName("release")
+            } else {
+                // Fallback for local builds without keystore secrets. Logs
+                // a clear warning so devs aren't surprised at upload time.
+                println("[halqa] release signing env-vars not set — falling back to DEBUG signing. Play Console uploads will be rejected. Set HALQA_KEYSTORE_PATH/PASSWORD/KEY_ALIAS/KEY_PASSWORD on CI.")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
