@@ -44,6 +44,8 @@ import com.halqa.app.ui.components.BadgeRow
 import com.halqa.app.ui.components.HalqaLogo
 import com.halqa.app.ui.components.avatarInitial
 import com.halqa.app.ui.navigation.Routes
+import com.halqa.app.ui.screens.main.FounderBanner
+import com.halqa.app.ui.screens.main.NotificationsPermissionGate
 import com.halqa.app.ui.theme.HalqaColors
 
 private val categories = listOf(
@@ -96,8 +98,18 @@ fun FeedScreen(navController: NavController) {
         else if (category == "PK") previews.filter { it.title.contains("PK") }
         else previews.filter { it.category == category || it.title.contains(category) }
 
+    // Lina — runtime POST_NOTIFICATIONS rationale + system prompt
+    // (Android 13+). Mounted at the top of `Main` so the user sees
+    // it on first reach after sign-in / DOB attestation, never during
+    // cold-start splash. One-shot via OnboardingPrefs.
+    NotificationsPermissionGate()
+
     Column(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         FeedHeader(navController)
+        // Lina — founder/VIP framing, one-shot at the very top of the
+        // feed. Reads the OnboardingPrefs flag and self-hides once
+        // the user dismisses it.
+        FounderBanner()
         CategoryRow(selected = category, onSelect = { category = it })
         Spacer(Modifier.height(8.dp))
 

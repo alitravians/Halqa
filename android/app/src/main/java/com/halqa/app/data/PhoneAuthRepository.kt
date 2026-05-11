@@ -167,6 +167,17 @@ object PhoneAuthRepository {
         if (bootstrapResult == UserDocBootstrap.Result.Created) {
             SignupTelemetry.heartbeat(extractCountryCode(e164PhoneNumber))
         }
+        // Lina — analytics user-tagging + conversion event. Runs on
+        // every Phone OTP success regardless of Created/Patched/Skipped
+        // so Crashlytics and Analytics see the uid before the screen
+        // navigates to DateOfBirth / Main. `sign_up` fires only on a
+        // brand-new doc; `login` fires on return sign-ins.
+        Analytics.setUser(uid)
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            Analytics.signUp(method = "phone")
+        } else {
+            Analytics.login(method = "phone")
+        }
         return uid
     }
 

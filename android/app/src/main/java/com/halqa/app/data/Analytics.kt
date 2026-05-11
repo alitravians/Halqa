@@ -69,7 +69,123 @@ object Analytics {
         )
     }
 
-    /** Crashlytics: tag the current user so reports are joinable to Firestore users/{uid}. */
+    /**
+     * Lina — conversion funnel entry. Fired exactly once per install,
+     * the moment a [UserDocBootstrap.Result.Created] result lands on
+     * any sign-in path. `method` is one of "phone", "google", "email".
+     *
+     * The event name `sign_up` is a Firebase Analytics standard event
+     * (FirebaseAnalytics.Event.SIGN_UP) so it surfaces on the default
+     * dashboard funnel and is automatically forwarded to BigQuery if
+     * the project ever turns on the export.
+     */
+    fun signUp(method: String) {
+        firebase.logEvent(
+            FirebaseAnalytics.Event.SIGN_UP,
+            Bundle().apply {
+                putString(FirebaseAnalytics.Param.METHOD, method)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Lina — conversion funnel return. Fired on every successful sign-in
+     * (including return sign-ins where the user doc already exists, i.e.
+     * the [UserDocBootstrap.Result.Patched] / [UserDocBootstrap.Result.Skipped]
+     * branches). Returns the same `method` taxonomy as [signUp] so the
+     * D7 / D30 retention funnel partitions cleanly.
+     */
+    fun login(method: String) {
+        firebase.logEvent(
+            FirebaseAnalytics.Event.LOGIN,
+            Bundle().apply {
+                putString(FirebaseAnalytics.Param.METHOD, method)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Lina — monetisation funnel. Fired immediately after a successful
+     * `POST /api/wallet/topup` (paid pack today, IAP later). Uses the
+     * Firebase standard `in_app_purchase` event so the LTV / ARPU
+     * dashboards work out of the box.
+     *
+     * `priceLabel` is a free-form string from the backend pack DTO
+     * (e.g. "‏€4.99", "45 ر.س.") — currency normalisation lives
+     * server-side, the client only forwards what it received.
+     */
+    fun topupCompleted(packId: String, coins: Long, priceLabel: String) {
+        firebase.logEvent(
+            "in_app_purchase",
+            Bundle().apply {
+                putString("pack_id", packId)
+                putLong("coins", coins)
+                putString("price_label", priceLabel)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Lina — monetisation funnel inverse. Fired the moment a viewer
+     * taps `إتمام السحب` in [WithdrawSheet] and the backend returns
+     * 200 (or the v0.1.23 503 stub — it still represents user intent).
+     * Critical for spotting cash-out drift before it hits the Q3 P&L
+     * report.
+     */
+    fun withdrawalInitiated(amountDiamonds: Long) {
+        firebase.logEvent(
+            "withdrawal_initiated",
+            Bundle().apply {
+                putLong("amount_diamonds", amountDiamonds)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Lina — activation funnel. Fired exactly ONCE per install the
+     * first time a viewer reaches the `LiveWatchScreen` and the watch
+     * session transitions into `WatchState.Watching`. The flag is
+     * persisted via [OnboardingPrefs] so a re-open of the same stream
+     * (or any future stream) does NOT re-fire.
+     */
+    fun firstStreamWatched(streamId: String) {
+        firebase.logEvent(
+            "first_stream_watched",
+            Bundle().apply {
+                putString("stream_id", streamId)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Lina — activation funnel inverse for the broadcaster side.
+     * Fired exactly ONCE per install the first time the broadcaster's
+     * own stream snapshot transitions `giftTotal` from 0 to >0 (i.e.
+     * the first gift they ever receive). Persisted via [OnboardingPrefs].
+     */
+    fun firstGiftReceived(streamId: String) {
+        firebase.logEvent(
+            "first_gift_received",
+            Bundle().apply {
+                putString("stream_id", streamId)
+                putLong("ts", System.currentTimeMillis())
+            },
+        )
+    }
+
+    /**
+     * Crashlytics + Firebase Analytics user tagging. Called by every
+     * sign-in path (`PhoneAuthRepository`, `GoogleAuthRepository`,
+     * `AuthRepository.signInWithEmailInternal`) immediately after
+     * `UserDocBootstrap.ensureUserDoc` resolves, so every subsequent
+     * Analytics event and Crashlytics report is joinable back to
+     * `/users/{uid}` without a separate ETL stage.
+     */
     fun setUser(uid: String) {
         crashlytics.setUserId(uid)
         firebase.setUserId(uid)

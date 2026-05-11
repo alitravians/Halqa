@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.halqa.app.data.Analytics
 import com.halqa.app.data.MockData
 import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.humanize
@@ -171,6 +172,14 @@ fun TopUpScreen(navController: NavController) {
                             // back through navigation state.
                             val granted = res.pack?.coins ?: 0
                             feedback = if (res.ok && granted > 0) {
+                                // Lina — monetisation funnel event. Fires
+                                // only on a successful credit, never on the
+                                // 24h-rate-limit branch (granted == 0).
+                                Analytics.topupCompleted(
+                                    packId = res.pack?.id ?: "BETA_TOPUP_PACK",
+                                    coins = granted.toLong(),
+                                    priceLabel = res.pack?.priceLabel ?: "BETA_FREE",
+                                )
                                 "تم إيداع $granted كوين في محفظتك."
                             } else {
                                 "تعذّر إتمام العملية."
