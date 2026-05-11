@@ -105,6 +105,11 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     val messages by ChatRepository.observe(streamId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
     var showGifts by remember { mutableStateOf(false) }
+    // Faisal — viewer-side safety reporting. Hoisted at the screen
+    // level so a recomposition (rotation, chat-list update) cannot
+    // dismiss a half-filled report form. Dismissal is opt-in via
+    // the dialog's own buttons or back-press.
+    var showReport by remember { mutableStateOf(false) }
     val giftCatalog by GiftRepository.catalog.collectAsState()
     // Lifecycle-aware: detach the Firestore snapshot listener when the
     // viewer's screen is stopped (notification panel pull, brief app
@@ -164,6 +169,7 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                 onClose = { navController.popBackStack() },
                 isPk = false,
                 onPk = { navController.navigate(Routes.avatarBattle("demo")) },
+                onReport = { showReport = true },
             )
 
             Box(modifier = Modifier.weight(1f)) {
@@ -221,6 +227,14 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
             )
         }
 
+        if (showReport) {
+            ReportSheet(
+                streamId = streamId,
+                reportedUid = watching?.ownerUid ?: streamSnapshot?.ownerUid,
+                onDismiss = { showReport = false },
+            )
+        }
+
         // Diamonds-raised badge mirrors what the broadcaster sees —
         // both surfaces read the same StreamSnapshot.giftTotal field,
         // so the count never drifts between viewer and host.
@@ -270,6 +284,7 @@ private fun StreamHeader(
     onClose: () -> Unit,
     isPk: Boolean,
     onPk: () -> Unit,
+    onReport: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -316,6 +331,19 @@ private fun StreamHeader(
             Spacer(Modifier.width(8.dp))
         }
 
+        IconButton(onClick = onReport) {
+            // Triangle warning emoji is rendered as a 22sp glyph rather
+            // than a Material icon because the report flow is the only
+            // toolbar action whose semantics must be unmistakable across
+            // Arabic + English keyboard locales — the emoji ships in
+            // every Android system font from API 24 upward.
+            Box(
+                modifier = Modifier.size(36.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("🚩", fontSize = 18.sp)
+            }
+        }
         IconButton(onClick = onClose) {
             Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
         }

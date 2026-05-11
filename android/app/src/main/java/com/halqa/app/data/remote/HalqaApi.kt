@@ -77,6 +77,26 @@ interface HalqaApi {
      */
     @POST("signup/heartbeat")
     suspend fun signupHeartbeat(@Body body: SignupHeartbeatRequest): SignupHeartbeatResponse
+
+    /**
+     * Faisal — in-app safety report (CSAE/Harassment/IP/Spam/Other).
+     * The Android `ReportSheet` POSTs here from `LiveWatchScreen` and
+     * (in v0.2) from the broadcaster's own toolbar. Khalid owns the
+     * backend route — until it lands, this call resolves to a 404 and
+     * the Android sheet falls through to a neutral "received, will be
+     * reviewed" path so we don't lose the user's intent or surface a
+     * raw 404 error.
+     *
+     * Body shape mirrors the existing `/audit` doc schema:
+     *   - `streamId` (required for live-watch reports; null for
+     *     profile/DM/general reports in v0.2)
+     *   - `reportedUid` (the broadcaster's uid for live-watch reports;
+     *     server resolves from streamId if null)
+     *   - `category` — one of the values in [ReportCategory]
+     *   - `notes` — free-text, ≤500 chars (client-truncated)
+     */
+    @POST("reports")
+    suspend fun submitReport(@Body body: SubmitReportRequest): SimpleOk
 }
 
 @Serializable
@@ -255,3 +275,37 @@ data class TopupResponse(
 
 @Serializable
 data class TopupPackDto(val id: String, val coins: Long, val priceLabel: String)
+
+/**
+ * Faisal — safety-report category. Mirrored on the backend by Khalid.
+ * Stored as the stable upper-case string identifier; the Arabic label
+ * is rendered client-side from [ReportCategory.arabicLabel] so a
+ * locale change doesn't require a backend redeploy.
+ *
+ * Order matters — it's the order Faisal's UX spec asks for in the
+ * picker (CSAE first because severity-of-harm dominates ordering for
+ * Play / NCMEC compliance).
+ */
+enum class ReportCategory(val id: String, val arabicLabel: String) {
+    CSAE("CSAE", "محتوى يستغل الأطفال"),
+    HARASSMENT("HARASSMENT", "تحرّش / تنمّر"),
+    IP("IP", "انتهاك حقوق ملكية"),
+    SPAM("SPAM", "سبام / محتوى مضلّل"),
+    OTHER("OTHER", "آخر"),
+}
+
+@Serializable
+data class SubmitReportRequest(
+    /** The live stream the report originated from, when applicable. */
+    val streamId: String? = null,
+    /**
+     * The user being reported. Optional — the backend resolves the
+     * broadcaster from `streamId` when this is null, which keeps the
+     * client honest in case the host swaps inside a single room.
+     */
+    val reportedUid: String? = null,
+    /** Stable identifier from [ReportCategory.id] — never the Arabic label. */
+    val category: String = "OTHER",
+    /** Free-text up to 500 chars (client truncates before send). */
+    val notes: String = "",
+)
