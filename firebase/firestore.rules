@@ -66,6 +66,18 @@ service cloud.firestore {
       // doesn't exist yet — `resource.data.get('dob', '') == ''`
       // returns the default sentinel. Subsequent updates must keep
       // the field bit-identical or omit it entirely.
+      //
+      // Layla GR1 / GR4 — `bypass_grant` (the closed-beta KYC-bypass
+      // audit map stamped by [UserDocBootstrap]) is immutable on the
+      // self-update path. The withdrawal hard-block at
+      // `/api/wallet/withdraw` keys on `bypass_grant.will_reverify`
+      // to refuse cashouts from grandfathered accounts pending manual
+      // re-KYC — without locking the field client-side, a tampered
+      // SDK client could `update({"bypass_grant.will_reverify": false})`
+      // and self-clear the gate. The manual re-KYC flow that clears
+      // `will_reverify` runs through the Admin SDK (backend) which
+      // bypasses these rules, so the immutability constraint only
+      // applies to client-side self-updates.
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
         && request.resource.data.uid == resource.data.uid
@@ -77,6 +89,10 @@ service cloud.firestore {
         && (
           !('dob_attested_at' in resource.data)
           || request.resource.data.dob_attested_at == resource.data.dob_attested_at
+        )
+        && (
+          !('bypass_grant' in resource.data)
+          || request.resource.data.bypass_grant == resource.data.bypass_grant
         );
 
       // staff can promote/demote OTHER users for moderation tooling, but
