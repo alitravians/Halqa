@@ -155,6 +155,75 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     const hd = typeof data.handle === "string" ? data.handle.trim() : "";
     displayName = dn.length > 0 ? dn : null;
     handle = hd.length > 0 ? hd : null;
+
+    // KHALID-R2-002 — backfill bypass_grant when the doc exists but
+    // the field is missing.
+    //
+    // Attack we close: a tampered client (modified APK, web Firestore
+    // SDK, curl with a valid id token) authenticates with Firebase
+    // Auth, then writes `/users/{uid}` DIRECTLY via the Firestore SDK
+    // with `role: 'user'` + `uid: uid` and NO bypass_grant field. The
+    // CREATE rule on /users permits this — `bypass_grant` is optional
+    // on create (`!('bypass_grant' in request.resource.data) || ...`).
+    // From that point on, every authenticated REST call lands here,
+    // sees `snap.exists`, falls into THIS branch, and the lazy-create
+    // backfill (the `else` branch below) never runs. The user's doc
+    // permanently lacks `bypass_grant`, and the /api/wallet/withdraw
+    // GR4 gate (which keys on `bypass_grant.will_reverify === true`)
+    // treats them as "not grandfathered" — falling through to the
+    // generic 503 today and (when v0.2 lifts that 503) to the actual
+    // cashout path WITHOUT manual re-KYC.
+    //
+    // The Android `UserDocBootstrap` writes `bypass_grant` correctly,
+    // and `requireUser`'s lazy-create branch (PR #92) writes it on
+    // server-side first-touch — but BOTH paths short-circuit when the
+    // doc already exists. A malicious client races them by creating
+    // the doc themselves, with the grant field omitted, before any
+    // backend call lands.
+    //
+    // Fix: any time we observe an existing /users/{uid} doc that is
+    // MISSING bypass_grant while the closed-beta flag is active,
+    // stamp it now. Admin SDK bypasses firestore.rules so the write
+    // succeeds even though the client-side rules don't permit
+    // `bypass_grant` in a self-update. The corresponding audit row
+    // gets the dedicated reason "BETA_M0_BACKEND_BACKFILL" so staff
+    // can distinguish a backfill from a normal first-sign-in stamp
+    // (which uses "BETA_M0_BACKEND_LAZY_CREATE" or the Android
+    // "BETA_M0_PHONE_OTP" / "BETA_M0_EMAIL").
+    //
+    // Idempotency: if a concurrent request runs the same backfill,
+    // both write the same shape with `merge: true` and Firestore
+    // commits commutatively. The audit row uses an auto-id so two
+    // races write two audit rows — duplicate-but-harmless. Better
+    // than racing for a single audit row and losing one branch.
+    const bypassActive = process.env.BYPASS_KYC_FOR_BETA === "true";
+    if (bypassActive && !data.bypass_grant) {
+      const nowIso = new Date().toISOString();
+      const db = adminFirestore();
+      const batch = db.batch();
+      batch.set(
+        userRef,
+        {
+          bypass_grant: {
+            reason: "BETA_M0_BACKEND_BACKFILL",
+            granted_at: nowIso,
+            granted_via: "BYPASS_KYC_FOR_BETA",
+            will_reverify: true,
+          },
+          updatedAt: nowIso,
+        },
+        { merge: true }
+      );
+      const auditRef = db.collection("audit").doc(uid).collection("events").doc();
+      batch.set(auditRef, {
+        uid,
+        type: "kyc_bypass_granted",
+        granted_at: nowIso,
+        reason: "BETA_M0_BACKEND_BACKFILL",
+        env_flag_value: true,
+      });
+      await batch.commit();
+    }
   } else {
     // Self-create on first call.
     //
