@@ -59,6 +59,7 @@ import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.GiftDto
 import com.halqa.app.data.remote.humanize
 import com.halqa.app.livekit.HalqaVideoRenderer
+import retrofit2.HttpException
 import kotlinx.coroutines.launch
 import com.halqa.app.livekit.WatchSession
 import com.halqa.app.livekit.WatchState
@@ -115,7 +116,27 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     // Firestore reads while the screen is offscreen.
     val streamSnapshot by StreamsRepository.observe(streamId)
         .collectAsStateWithLifecycle(initialValue = null)
+    // Noura — monetisation funnel guardrail. The gift-send result has
+    // three terminal states from the user's perspective:
+    //
+    //   1. success → dismiss the panel (already the contract).
+    //   2. insufficient coins (HTTP 402) → user wants to gift but can't.
+    //      Pre-PR-C the panel just rendered the backend's English
+    //      "Insufficient coins: need N, have M" string and stopped.
+    //      The viewer had no in-context route to TopUp from Live Watch —
+    //      they had to dismiss, drawer → Wallet → TopUp, four taps and
+    //      a context switch. Most viewers gave up. This branch surfaces
+    //      a clean Arabic message + an "اشحن الآن" CTA that pops them
+    //      straight into TopUp with a preserved back-stack so they
+    //      land back on the same stream.
+    //   3. any other failure → the existing inline-error path.
+    //
+    // The state is split into two mutually-exclusive slots so the
+    // panel can give the insufficient-coins case a CTA without also
+    // showing a misleading red-error treatment.
     var giftError by remember { mutableStateOf<String?>(null) }
+    var giftInsufficient by remember { mutableStateOf<String?>(null) }
+    var giftSending by remember { mutableStateOf(false) }
     val giftScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -193,12 +214,29 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
             GiftPanel(
                 gifts = giftCatalog,
                 error = giftError,
+                insufficientCoins = giftInsufficient,
+                sending = giftSending,
                 onDismiss = {
                     showGifts = false
                     giftError = null
+                    giftInsufficient = null
+                    giftSending = false
+                },
+                onTopUp = {
+                    // Dismiss the gift panel and route to TopUp. The
+                    // back-stack root (LiveWatch) is preserved so the
+                    // viewer naturally lands back on the same stream
+                    // after a successful top-up — no popUpTo() needed.
+                    showGifts = false
+                    giftError = null
+                    giftInsufficient = null
+                    giftSending = false
+                    navController.navigate(Routes.TopUp)
                 },
                 onSend = { gift ->
                     giftError = null
+                    giftInsufficient = null
+                    giftSending = true
                     giftScope.launch {
                         val result = runCatching {
                             GiftRepository.send(
@@ -207,6 +245,7 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                                 receiverUid = streamSnapshot?.ownerUid,
                             )
                         }
+                        giftSending = false
                         result.onSuccess {
                             // Authoritative balance update lands via
                             // WalletRepository's Firestore listener.
@@ -214,7 +253,12 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
                             // StreamsRepository.observe (M1 SSoT).
                             showGifts = false
                         }.onFailure { t ->
-                            giftError = t.humanize(fallback = "تعذّر إرسال الهدية")
+                            if (isInsufficientCoins(t)) {
+                                giftInsufficient =
+                                    "رصيدك من الكوينز غير كافٍ لإرسال هذه الهدية. اشحن رصيدك للمتابعة."
+                            } else {
+                                giftError = t.humanize(fallback = "تعذّر إرسال الهدية")
+                            }
                         }
                     }
                 },
@@ -460,15 +504,35 @@ private fun BottomBar(onGift: () -> Unit, onLike: () -> Unit) {
     }
 }
 
+/**
+ * Noura — true when the gift-send failure was a `HTTP 402 Insufficient
+ * coins` from the backend `gifts/send` route (see
+ * `backend/src/app/api/gifts/send/route.ts` line ~123). Detected on
+ * code AND on the stable English error-body substring so a future
+ * status-code reshuffle still keeps the routing intact.
+ */
+private fun isInsufficientCoins(t: Throwable): Boolean {
+    if (t !is HttpException) return false
+    if (t.code() == 402) return true
+    val body = try {
+        t.response()?.errorBody()?.string().orEmpty()
+    } catch (_: Throwable) {
+        ""
+    }
+    return body.contains("Insufficient coins", ignoreCase = true)
+}
+
 @Composable
 private fun GiftPanel(
     gifts: List<GiftDto>,
     error: String?,
+    insufficientCoins: String?,
+    sending: Boolean,
     onDismiss: () -> Unit,
+    onTopUp: () -> Unit,
     onSend: (GiftDto) -> Unit,
 ) {
     var selected by remember { mutableStateOf<GiftDto?>(null) }
-    var sending by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -517,7 +581,45 @@ private fun GiftPanel(
                 }
             }
 
-            if (error != null) {
+            if (insufficientCoins != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(HalqaColors.Gold.copy(alpha = 0.16f))
+                        .border(
+                            1.dp,
+                            HalqaColors.Gold.copy(alpha = 0.55f),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        insufficientCoins,
+                        color = HalqaColors.Gold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(HalqaColors.Gold, HalqaColors.GoldLight)))
+                            .clickable(onClick = onTopUp)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            "اشحن الآن",
+                            color = Color(0xFF111111),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            } else if (error != null) {
                 Text(
                     error,
                     color = HalqaColors.Pink,
@@ -547,10 +649,7 @@ private fun GiftPanel(
                             else Brush.linearGradient(listOf(Color.Gray, Color.DarkGray)),
                         )
                         .clickable(enabled = canSend) {
-                            selected?.let {
-                                sending = true
-                                onSend(it)
-                            }
+                            selected?.let { onSend(it) }
                         }
                         .padding(horizontal = 20.dp, vertical = 10.dp),
                 ) {
