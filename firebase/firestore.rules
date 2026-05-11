@@ -155,13 +155,25 @@ service cloud.firestore {
       // console directly — without it, a console ban would write
       // /users/{uid}.banned but skip the /audit_log row, so we
       // intentionally keep both paths working but document the
-      // route as preferred. uid + createdAt are implicitly
-      // immutable through the allowlist.
+      // route as preferred.
+      //
+      // `linked_accounts` (Yasser Y-H3 / PR-M) is an array of uids
+      // that belong to the same human (sister phone, second Google,
+      // post-KYC merge). The gift-send route reads it inside its txn
+      // and rejects self-gifts to a linked uid. Normal write path is
+      // `/api/admin/users/{uid}/linked-accounts` (Admin SDK, writes
+      // both sides symmetrically + audit_log row). Console direct-
+      // writes by an admin are allowed via this allowlist for
+      // emergency overrides only.
+      //
+      // uid + createdAt are implicitly immutable through the
+      // allowlist.
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly([
                'role', 'bypass_grant', 'updatedAt',
-               'banned', 'ban_reason', 'banned_by', 'banned_at'
+               'banned', 'ban_reason', 'banned_by', 'banned_at',
+               'linked_accounts'
              ]);
 
       // admin only delete
