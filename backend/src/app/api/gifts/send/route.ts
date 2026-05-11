@@ -7,6 +7,7 @@ import { findGift } from "@/lib/gifts";
 import {
   assertAndIncrementGiftRate,
   assertNotBlockedFromGifting,
+  MAX_BATCH_COUNT,
 } from "@/lib/gift-rate-limit";
 
 export const runtime = "nodejs";
@@ -61,11 +62,52 @@ export async function POST(req: NextRequest) {
     };
     const streamId = typeof body.streamId === "string" ? body.streamId.trim() : "";
     const giftId = typeof body.giftId === "string" ? body.giftId.trim() : "";
-    const countRaw = typeof body.count === "number" ? body.count : 1;
-    const count = Math.max(1, Math.min(99, Math.floor(countRaw)));
 
     if (!streamId) throw new HttpError(400, "streamId is required");
     if (!giftId) throw new HttpError(400, "giftId is required");
+
+    // Yasser Y-H2 — strict count validation BEFORE the txn. The earlier
+    // implementation silently clamped (`Math.max(1, Math.min(99,
+    // Math.floor(countRaw)))`) which:
+    //   - accepted NaN  -> floor(NaN)=NaN -> Math.min(99,NaN)=NaN ->
+    //     Math.max(1,NaN)=NaN, then totalCoins = price * NaN = NaN,
+    //     and `senderCoins < NaN` is FALSE (any comparison with NaN is
+    //     false), so the balance gate passed and we tried to debit NaN
+    //     coins. FieldValue.increment(-NaN) is a no-op on the count but
+    //     coinsSpent ended up NaN too, corrupting the wallet doc.
+    //   - accepted Infinity -> floor(Infinity)=Infinity ->
+    //     Math.min(99,Infinity)=99, so this particular path was clamped
+    //     to 99 (safe). But the silent normalisation hid the client bug
+    //     from observability — nothing logged that the client sent
+    //     garbage.
+    //   - accepted negative / zero / fractional -> clamped to 1 (safe)
+    //     but again silent normalisation hid client bugs.
+    //
+    // Strict validation: must be a finite, positive integer in
+    // [1, MAX_BATCH_COUNT]. Reject 400 with a structured `code` so the
+    // Android client can distinguish input-validation failures from
+    // generic 400s in metrics.
+    const countRaw = body.count;
+    let count: number;
+    if (countRaw === undefined || countRaw === null) {
+      // Backwards-compat: clients that omit `count` get `count=1` for
+      // a single-shot gift. This is the most common path.
+      count = 1;
+    } else if (
+      typeof countRaw !== "number" ||
+      !Number.isFinite(countRaw) ||
+      !Number.isInteger(countRaw) ||
+      countRaw < 1 ||
+      countRaw > MAX_BATCH_COUNT
+    ) {
+      throw new HttpError(
+        400,
+        `count must be an integer between 1 and ${MAX_BATCH_COUNT}.`,
+        "INVALID_COUNT"
+      );
+    } else {
+      count = countRaw;
+    }
 
     const gift = findGift(giftId);
     if (!gift) throw new HttpError(404, `Unknown gift: ${giftId}`);
@@ -98,6 +140,42 @@ export async function POST(req: NextRequest) {
         throw new HttpError(403, "Cannot gift your own stream");
       }
 
+      // Yasser Y-H3 — linked-account self-gift block.
+      //
+      // The simple `ownerUid === sender.uid` guard above only catches
+      // the trivial self-gift case where the sender's own Auth account
+      // is hosting the stream. It does NOT catch the laundering vector
+      // where a user creates a SECOND Auth account (sister phone,
+      // second Google), tops it up via the beta wallet grant, and
+      // self-gifts from the secondary to the primary to inflate
+      // `diamondTotal` on the leaderboard.
+      //
+      // We close the loophole by reading the sender's user doc inside
+      // the txn snapshot and rejecting if `ownerUid` appears in their
+      // `linked_accounts` array. The linkage is established by a
+      // moderator-or-admin call to
+      // `/api/admin/users/{uid}/linked-accounts` (PR-M new endpoint)
+      // which writes the array on BOTH sides of the pair atomically,
+      // so checking only the sender's side is sufficient. The check
+      // is a snapshot READ inside the txn, so a moderator linking the
+      // pair after our read but before our commit triggers Firestore
+      // optimistic retry and the gift will be re-evaluated against
+      // the new linkage — close-race safe.
+      const senderUserRef = db.collection("users").doc(sender.uid);
+      const senderUserSnap = await tx.get(senderUserRef);
+      const senderUserData = senderUserSnap.exists ? senderUserSnap.data() ?? {} : {};
+      const linkedRaw = senderUserData.linked_accounts;
+      const linkedAccounts: string[] = Array.isArray(linkedRaw)
+        ? linkedRaw.filter((v): v is string => typeof v === "string")
+        : [];
+      if (linkedAccounts.includes(ownerUid)) {
+        throw new HttpError(
+          403,
+          "Cannot gift a linked secondary account.",
+          "LINKED_ACCOUNT_SELF_GIFT"
+        );
+      }
+
       // Host blocklist check inside the txn snapshot. Passing `tx`
       // here is what actually makes Firestore retry the transaction
       // when the host writes to their blocklist between our read and
@@ -114,7 +192,11 @@ export async function POST(req: NextRequest) {
       // requests all read count=0 and bypassed the cap. See the
       // module-level docstring on `gift-rate-limit.ts` for the full
       // story.
-      await assertAndIncrementGiftRate(streamId, sender.uid, tx);
+      //
+      // Yasser Y-H1: caps are now UNIT-based; we pass `count` so the
+      // counter increments by N units, not by 1. A request with
+      // count=50 trips the per-minute cap by itself.
+      await assertAndIncrementGiftRate(streamId, sender.uid, count, tx);
 
       const senderCoins = senderWalletSnap.exists
         ? Number(senderWalletSnap.data()?.coins ?? 0)

@@ -6,7 +6,7 @@ import { HttpError } from "@/lib/auth";
  * Gift-bombing rate limits — Mohammed Al-Qahtani (Stream Moderation Lead)
  * council session: c6e9353660d84045b075478745a3c35f
  *
- * Mohammed's spec for closed-beta abuse mitigation:
+ * Mohammed's original spec for closed-beta abuse mitigation:
  *   - 5 gifts/sender/stream/60s   — guard against rapid-fire spam in a single stream
  *   - 60 gifts/sender/stream/hour — guard against sustained bombing
  *   - host blocklist              — host can ban a specific sender from gifting them
@@ -16,6 +16,25 @@ import { HttpError } from "@/lib/auth";
  * `gifts` collectionGroup. Deferred to v0.1.15 (M4) so the closed-beta
  * cohort (50 testers) is not blocked on infra setup. Per-stream limits
  * + blocklist cover the realistic abuse vectors at this size.
+ *
+ * --- Yasser Round-2 HIGH (Y-H1): unit-based caps ---
+ *
+ * The original implementation counted REQUESTS, not gift units. A
+ * sender could send one request with `count=99` and trip the rate-
+ * limit counter by exactly 1, while actually delivering 99 gifts'
+ * worth of visual/audible spam plus 99× the coin debit. A whale
+ * batching `count=99` could bypass the per-minute cap by ~99×.
+ *
+ * Caps now express gift UNITS per window (a request with `count=N`
+ * costs N units). Defaults preserve roughly the original burst budget
+ * for count=1 senders but cap the worst-case unit throughput:
+ *
+ *   GIFT_UNITS_PER_MIN_PER_SENDER  default 50   (was 5 requests)
+ *   GIFT_UNITS_PER_HOUR_PER_SENDER default 600  (was 60 requests)
+ *
+ * Both are env-configurable for production tuning without redeploy.
+ * On rejection we report the user-visible cap so the client can
+ * tell the sender exactly how big the limit is.
  *
  * --- Design note: counter doc, not aggregate query ---
  *
@@ -51,12 +70,35 @@ import { HttpError } from "@/lib/auth";
  * subcollection.
  */
 
-const RATE_LIMIT_PER_60S = 5;
-const RATE_LIMIT_PER_HOUR = 60;
+/**
+ * Maximum number of gift units carried by a single `/api/gifts/send`
+ * request. This is the FIRST gate (route-handler-level) — strict input
+ * validation. It bounds the per-request cost and prevents one request
+ * from blowing up the txn (Firestore txn size limits, audit_log row
+ * sprawl, single-request whale annihilation). Per-window caps are
+ * applied separately inside `assertAndIncrementGiftRate`.
+ */
+export const MAX_BATCH_COUNT = 99;
+
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (typeof raw !== "string" || raw.trim().length === 0) return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
+
+const RATE_UNITS_PER_60S = envPositiveInt("GIFT_UNITS_PER_MIN_PER_SENDER", 50);
+const RATE_UNITS_PER_HOUR = envPositiveInt("GIFT_UNITS_PER_HOUR_PER_SENDER", 600);
 const WINDOW_60S_MS = 60_000;
 const WINDOW_HOUR_MS = 3_600_000;
 
 interface RateCounterDoc {
+  // Stored as cumulative UNIT counts (gift units sent in the current
+  // window). Field names kept verbatim for backward compat with docs
+  // written before the unit-based switch — a sender whose old doc has
+  // count=4 simply rolls forward as 4 units (close enough; under-
+  // counting old activity in transition is safer than over-counting).
   windowSecCount?: number;
   windowSecResetAt?: Timestamp;
   windowHourCount?: number;
@@ -68,6 +110,12 @@ interface RateCounterDoc {
  * Assert the sender is within the per-stream gift rate limits and bump
  * the counter — atomically, inside the caller's gift transaction.
  *
+ * Yasser Y-H1: caps are measured in gift UNITS (sum of `count` across
+ * recent requests), not in request count. A request that delivers N
+ * gifts costs N units. The caller passes the request's `units` so the
+ * counter can `current + units > cap` correctly. (A request with
+ * count=1 still costs 1 unit, preserving prior single-shot behaviour.)
+ *
  * Contract:
  *   - MUST be called from inside `db.runTransaction(...)`.
  *   - MUST be called BEFORE the first `tx.set` in that transaction
@@ -75,8 +123,14 @@ interface RateCounterDoc {
  *   - The counter `tx.set` issued at the end of this function counts
  *     as a write, so the caller's wallet/stream/audit `tx.set` calls
  *     must come AFTER this function returns.
+ *   - `units` MUST be a finite positive integer ≤ MAX_BATCH_COUNT.
+ *     Callers are expected to have validated this BEFORE entering the
+ *     txn (so we don't waste a Firestore read on garbage input). We
+ *     defensively assert anyway because a route bug that lets NaN
+ *     through would otherwise silently store NaN in the counter doc
+ *     and permanently jam the sender.
  *
- * On rate limit hit: throws `HttpError(429, …)` with an Arabic message.
+ * On rate limit hit: throws `HttpError(429, …, code="RATE_LIMITED")`.
  * The thrown error rolls the entire txn back, so the counter increment
  * does NOT persist for rejected attempts — only successful gifts count
  * toward the cap. (This intentionally mirrors the old aggregate-query
@@ -86,8 +140,16 @@ interface RateCounterDoc {
 export async function assertAndIncrementGiftRate(
   streamId: string,
   senderUid: string,
+  units: number,
   tx: Transaction
 ): Promise<void> {
+  if (!Number.isInteger(units) || units < 1 || units > MAX_BATCH_COUNT) {
+    // Defence-in-depth — route MUST have rejected this before calling
+    // us. Throw as 500 because by the time we get here it's a server
+    // contract violation, not a client-correctable error.
+    throw new HttpError(500, "Invalid rate-limit unit count.");
+  }
+
   const db = adminFirestore();
   const counterRef = db
     .collection("streams")
@@ -109,10 +171,11 @@ export async function assertAndIncrementGiftRate(
     secResetAtMs = now + WINDOW_60S_MS;
   }
 
-  if (secCount >= RATE_LIMIT_PER_60S) {
+  if (secCount + units > RATE_UNITS_PER_60S) {
     throw new HttpError(
       429,
-      `هدّئ السرعة — حد ${RATE_LIMIT_PER_60S} هدايا في الدقيقة الواحدة لهذا البث.`
+      `هدّئ السرعة — حد ${RATE_UNITS_PER_60S} وحدة هدية في الدقيقة لهذا البث.`,
+      "RATE_LIMITED"
     );
   }
 
@@ -124,10 +187,11 @@ export async function assertAndIncrementGiftRate(
     hourResetAtMs = now + WINDOW_HOUR_MS;
   }
 
-  if (hourCount >= RATE_LIMIT_PER_HOUR) {
+  if (hourCount + units > RATE_UNITS_PER_HOUR) {
     throw new HttpError(
       429,
-      `وصلت الحد الأقصى ${RATE_LIMIT_PER_HOUR} هدية في الساعة لهذا البث.`
+      `وصلت الحد الأقصى ${RATE_UNITS_PER_HOUR} وحدة هدية في الساعة لهذا البث.`,
+      "RATE_LIMITED"
     );
   }
 
@@ -138,9 +202,9 @@ export async function assertAndIncrementGiftRate(
   // semantics.
   tx.set(counterRef, {
     senderUid,
-    windowSecCount: secCount + 1,
+    windowSecCount: secCount + units,
     windowSecResetAt: Timestamp.fromMillis(secResetAtMs),
-    windowHourCount: hourCount + 1,
+    windowHourCount: hourCount + units,
     windowHourResetAt: Timestamp.fromMillis(hourResetAtMs),
     updatedAt: nowTs,
   });

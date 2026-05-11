@@ -480,7 +480,13 @@ export function isModerator(user: AuthedUser): boolean {
 }
 
 export class HttpError extends Error {
-  constructor(public status: number, msg: string) {
+  // `code` is an optional, stable, machine-parseable error code that
+  // the client can switch on (e.g. "INVALID_COUNT", "RATE_LIMITED")
+  // without parsing free-text `message`. When present `asError`
+  // includes it in the JSON body alongside `error`. When absent the
+  // body keeps the existing `{ error }` shape so existing callers and
+  // existing client humanize() paths are unaffected.
+  constructor(public status: number, msg: string, public code?: string) {
     super(msg);
   }
 }
@@ -525,7 +531,9 @@ export function asJson(status: number, body: unknown): Response {
  */
 export function asError(err: unknown): Response {
   if (err instanceof HttpError) {
-    return asJson(err.status, { error: err.message });
+    const body: { error: string; code?: string } = { error: err.message };
+    if (err.code) body.code = err.code;
+    return asJson(err.status, body);
   }
   // Short, low-collision request id. Clients can quote it when
   // reporting an issue and we can grep Vercel logs for it.
