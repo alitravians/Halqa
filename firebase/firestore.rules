@@ -535,5 +535,49 @@ service cloud.firestore {
       allow read: if isStaff();
       allow write: if false;
     }
+
+    // -------- /reports/{reportId} (PR-G — Faisal Critical) --------
+    // User-filed reports of abuse / IP infringement / spam / CSAE.
+    // The Android UI (long-press → "Report …") POSTs to /api/reports;
+    // the backend writes here via the Admin SDK inside a single txn
+    // with the rate-limit counter bump and the /audit_log row.
+    //
+    // Client direct-writes are forbidden — the rate-limit + audit
+    // invariants live in the backend route, and trusting a client
+    // not to short-circuit them is the same security mistake the
+    // gift rate-limit fix (#73) closed. Reads are scoped:
+    //
+    //   - the reporter can read their OWN report (transparency:
+    //     "what did I submit"),
+    //   - staff can read all (moderation queue),
+    //   - the reported user CANNOT read the report against them
+    //     (would tell them they're being reported and let them edit
+    //     evidence before staff triage).
+    //
+    // Status updates (open → triaged → actioned | dismissed) flow
+    // through POST /api/reports/{reportId} which double-stamps the
+    // /audit_log so the moderation chain of custody is preserved.
+    match /reports/{reportId} {
+      allow read: if isStaff()
+        || (isSignedIn() && resource.data.reporterUid == uid());
+      allow write: if false; // server-only via Admin SDK
+    }
+
+    // -------- /reportRateCounters/{reporterUid_YYYY-MM-DD} (PR-G) --------
+    // Per-(reporter, UTC-day) rate-limit counter. Same pattern as
+    // /streams/{id}/giftRateCounters — the counter doc lives in its
+    // own top-level collection (rather than nested under /users/{uid})
+    // so a future cleanup cron can scan a single collection without
+    // touching the user docs.
+    //
+    // Written exclusively by the Admin SDK inside the /api/reports
+    // POST transaction (10 reports / reporter / day cap). Never read
+    // by the client. If a future "have I hit my daily cap?" UI ships,
+    // it should call a backend endpoint that reads via Admin SDK and
+    // returns a sanitised payload — not by relaxing this rule.
+    match /reportRateCounters/{counterId} {
+      allow read: if false;
+      allow write: if false; // server-only via Admin SDK
+    }
   }
 }
