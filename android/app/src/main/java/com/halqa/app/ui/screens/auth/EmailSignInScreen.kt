@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.halqa.app.data.AuthRepository
+import com.halqa.app.data.SignupCapReachedException
 import com.halqa.app.domain.AuthFailure
 import com.halqa.app.domain.AuthResult
 import com.halqa.app.ui.components.HalqaTextField
@@ -61,8 +62,18 @@ import kotlinx.coroutines.launch
  * delegates to Firebase Auth `signInOrCreateWithEmail`, so a brand-new
  * email creates the account and signs in atomically.
  *
- * If the resolved role has staff power (admin / staff / moderator / scout),
- * we route the user to the staff home; otherwise to the regular Main tab.
+ * Post-success routing — Layla LAYLA-001:
+ *  - Staff accounts (admin / staff / moderator / scout): route directly to
+ *    [Routes.StaffHome]. Staff are pre-provisioned (`/users/{uid}` already
+ *    exists with `role`), and their workflow does not include broadcasting,
+ *    so the DOB ≥18 gate is irrelevant for them.
+ *  - Regular users: route to [Routes.DateOfBirth] (mirroring the Phone OTP
+ *    and Google paths). That screen's idempotent precheck short-circuits
+ *    straight to [Routes.Main] when a `dob` field already exists in the
+ *    user doc, so return sign-ins land on Main with no extra step. First-
+ *    time email signups now go through the same DOB self-attestation gate
+ *    Phone + Google use, closing the bypass Tariq's audit (AUDIT-004 →
+ *    LAYLA-001) flagged.
  */
 @Composable
 fun EmailSignInScreen(navController: NavController) {
@@ -71,7 +82,7 @@ fun EmailSignInScreen(navController: NavController) {
     LaunchedEffect(account) {
         val role = account?.role
         if (role != null) {
-            val target = if (role.hasStaffPower) Routes.StaffHome else Routes.Main
+            val target = if (role.hasStaffPower) Routes.StaffHome else Routes.DateOfBirth
             navController.navigate(target) {
                 popUpTo(Routes.Auth) { inclusive = true }
             }
@@ -94,14 +105,29 @@ fun EmailSignInScreen(navController: NavController) {
         }
         loading = true
         scope.launch {
-            val result = AuthRepository.signInWithEmail(email, password)
+            val result = try {
+                AuthRepository.signInWithEmail(email, password)
+            } catch (_: SignupCapReachedException) {
+                // Layla GR5 — closed-beta daily cap was hit server-side.
+                // The Firebase Auth user + `/users/{uid}` doc were already
+                // created by AuthRepository before SignupTelemetry threw;
+                // surface the locked message inline (same pattern as the
+                // Google path in AuthScreen.kt) and refuse to nav.
+                errorText = "تم بلوغ السقف اليومي للتسجيل في النسخة التجريبية. حاول غداً."
+                loading = false
+                return@launch
+            }
             loading = false
             when (result) {
                 is AuthResult.Success -> {
+                    // LAYLA-001 — staff bypass DOB; regular users go through
+                    // DateOfBirthScreen (which idempotently routes returning
+                    // users straight to Main, and routes brand-new email
+                    // signups through the GR3 self-attestation picker).
                     val target = if (result.account.role.hasStaffPower) {
                         Routes.StaffHome
                     } else {
-                        Routes.Main
+                        Routes.DateOfBirth
                     }
                     navController.navigate(target) {
                         popUpTo(Routes.Auth) { inclusive = true }
