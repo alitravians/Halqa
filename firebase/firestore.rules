@@ -456,5 +456,14 @@ service cloud.firestore {
 
       allow write: if false;
     }
+
+    // -------- /csae_preserved/{caseId} --------
+    // CSAE evidence preservation (PR-I). Written ONLY by the Admin SDK via
+    // /api/admin/csae/preserve. Immutable from clients — no update, no delete,
+    // ever. Readable only by staff (T&S work).
+    match /csae_preserved/{caseId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
   }
 }
