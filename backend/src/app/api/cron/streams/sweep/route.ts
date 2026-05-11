@@ -117,11 +117,47 @@ async function handle(req: NextRequest) {
       // is the same idempotency-on-status pattern used by streams/end
       // and the room_finished webhook branch, so all four lifecycle
       // paths agree: "ended means ended — no late mutations".
+      //
+      // KHALID-R2-001 — re-check staleness inside the txn, NOT just
+      // status. Without the inner staleness check, this race ends a
+      // legitimate stream:
+      //
+      //   t=0:00   outer scan reads lastWebhookAt = 14m old (stale).
+      //   t=0:02   publisher's app reconnects, LiveKit fires
+      //            participant_joined; webhook handler updates
+      //            lastWebhookAt = now (fresh).
+      //   t=0:03   txn fires; inner read shows status="live" (still
+      //            true) so the idempotency gate passes, even though
+      //            lastWebhookAt is now 1s old, not 14m. Old code
+      //            force-ends the freshly-resumed stream.
+      //
+      // The inner predicate re-derives idle/age from the txn snapshot
+      // (committed view) so the decision to end uses the SAME data
+      // the commit replaces. If the stream reconnected between the
+      // outer scan and the txn, the txn snapshot's lastWebhookAt is
+      // already fresh and the predicate short-circuits — we observe
+      // it via Firestore's optimistic concurrency, which retries the
+      // txn when the doc was touched between read and commit.
       await db.runTransaction(async (tx) => {
         const fresh = await tx.get(ref);
         if (!fresh.exists) return;
         const fd = fresh.data() ?? {};
         if (fd.status !== "live") return;
+
+        const freshStartMs = parseTime(fd.startTime);
+        const freshWebhookMs = parseTime(fd.lastWebhookAt);
+        const freshLastSignalMs = !Number.isNaN(freshWebhookMs)
+          ? freshWebhookMs
+          : freshStartMs;
+        const freshIdleMs = !Number.isNaN(freshLastSignalMs)
+          ? Date.now() - freshLastSignalMs
+          : 0;
+        const freshAgeMs = !Number.isNaN(freshStartMs)
+          ? Date.now() - freshStartMs
+          : 0;
+        const stillStale =
+          freshIdleMs > STALE_THRESHOLD_MS || freshAgeMs > HARD_MAX_AGE_MS;
+        if (!stillStale) return;
 
         const endTime = new Date().toISOString();
         tx.update(ref, {
