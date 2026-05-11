@@ -17,8 +17,8 @@ android {
         applicationId = "com.halqa.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 24
-        versionName = "0.1.23"
+        versionCode = 25
+        versionName = "0.1.24"
         vectorDrawables { useSupportLibrary = true }
         resourceConfigurations += listOf("ar", "en")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
