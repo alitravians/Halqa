@@ -180,6 +180,7 @@ object AuthRepository {
             email = user.email ?: trimmed,
             displayName = user.displayName,
             avatar = null,
+            bypassReason = UserDocBootstrap.BypassReason.EmailSignIn,
         )
         if (bootstrapResult == UserDocBootstrap.Result.Created) {
             // `phoneCountryCode = null` matches the Google path; the

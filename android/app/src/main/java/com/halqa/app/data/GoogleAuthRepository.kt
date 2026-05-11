@@ -86,6 +86,7 @@ object GoogleAuthRepository {
             email = account.email,
             displayName = account.displayName,
             avatar = account.photoUrl?.toString(),
+            bypassReason = UserDocBootstrap.BypassReason.GoogleSignIn,
         )
         // Layla's GR5: same daily signup heartbeat as the Phone OTP path.
         // Google sign-ins don't carry a phone country code, so the
