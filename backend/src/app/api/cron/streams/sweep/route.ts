@@ -21,9 +21,15 @@ export const dynamic = "force-dynamic";
  * coins on a dead room.
  *
  * Force-end criteria (any one triggers):
- *   - `lastWebhookAt` older than STALE_THRESHOLD_MS. The webhook stream
- *     for a healthy room continuously stamps this on every join/leave;
- *     15 minutes of total silence means the room is effectively dead.
+ *   - `lastWebhookAt` older than STALE_THRESHOLD_MS. After the webhook
+ *     handler was widened (see `api/livekit/webhook` top-of-route
+ *     stamp), a healthy LiveKit room stamps this on every event type
+ *     the room produces — `room_started`, `participant_*`,
+ *     `track_*`, `egress_*`, `ingress_*`. The threshold is 60 minutes
+ *     of total silence — the original 15-minute window was reaping
+ *     legitimate solo broadcasts because LiveKit emits no periodic
+ *     heartbeats, so a publisher with zero viewers and no track
+ *     changes produced no webhook stamps for the full broadcast.
  *   - No `lastWebhookAt` ever stamped AND `startTime` older than
  *     STALE_THRESHOLD_MS. This catches the "started, never had a viewer,
  *     publisher crashed" case where no webhook ever lands.
@@ -49,7 +55,7 @@ export const dynamic = "force-dynamic";
  * cron than to leave the force-end endpoint world-callable.
  */
 
-const STALE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+const STALE_THRESHOLD_MS = 60 * 60 * 1000; // 60 minutes
 const HARD_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 function parseTime(v: unknown): number {
