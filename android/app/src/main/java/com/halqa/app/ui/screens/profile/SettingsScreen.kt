@@ -17,9 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,8 +42,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.halqa.app.data.FirebaseAuthRepository
 import com.halqa.app.data.UserRepository
+import com.halqa.app.data.remote.ApiClient
 import com.halqa.app.data.remote.SettingsDto
 import com.halqa.app.data.remote.humanize
+import com.halqa.app.ui.navigation.Routes
 import com.halqa.app.ui.theme.HalqaColors
 import kotlinx.coroutines.launch
 
@@ -67,6 +72,15 @@ fun SettingsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(live) { working = live }
+
+    // Reem — account-deletion dialog state hoisted to the screen
+    // composable so a recomposition doesn't dismiss a confirmation
+    // mid-flight. `isDeleting` blocks dismissal while the DELETE
+    // call is in flight so the user can't double-tap-cancel into a
+    // half-deleted state.
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var isDeleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
 
     fun mutate(update: (SettingsDto) -> SettingsDto) {
         val next = update(working)
@@ -148,7 +162,172 @@ fun SettingsScreen(navController: NavController) {
         saveError?.let {
             Text(it, color = HalqaColors.Pink, fontSize = 13.sp)
         }
+
+        // Reem — Play 2024 in-app account deletion. Placed at the very
+        // bottom under منطقة خطرة (Danger Zone) so users don't
+        // mistake it for a settings toggle. The Play 2024 policy
+        // requires a path to deletion (and data downgrade) that's
+        // reachable from inside the app without contacting support,
+        // and console reviewers explicitly look for this surface
+        // during the privacy review.
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("منطقة خطرة")
+        DangerZone(
+            onDeleteRequested = { showDeleteDialog = true },
+        )
         Spacer(Modifier.height(40.dp))
+    }
+
+    if (showDeleteDialog) {
+        DeleteAccountDialog(
+            isLoading = isDeleting,
+            error = deleteError,
+            onConfirm = {
+                deleteError = null
+                isDeleting = true
+                scope.launch {
+                    val result = runCatching { ApiClient.api.deleteMe() }
+                    isDeleting = false
+                    result.onSuccess {
+                        showDeleteDialog = false
+                        // Sign out locally so the next composition of
+                        // [AuthScreen] doesn't see a stale Firebase
+                        // currentUser. The server has already revoked
+                        // the session via Admin SDK so the cached ID
+                        // token would 401 on its next refresh anyway,
+                        // but explicit sign-out is cheaper than
+                        // bouncing through 401 + AuthAuthenticator.
+                        runCatching { FirebaseAuthRepository.signOut() }
+                        // Pop everything back to AuthScreen. `inclusive=true`
+                        // on the *current* destination ensures Settings
+                        // is also dropped — a stale Settings under
+                        // AuthScreen would briefly recompose with the
+                        // post-sign-out null uid and flash the
+                        // SignInRequired screen.
+                        navController.navigate(Routes.Auth) {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }.onFailure { t ->
+                        deleteError = t.humanize(fallback = "تعذّر حذف الحساب. جرّب لاحقاً.")
+                    }
+                }
+            },
+            onDismiss = {
+                if (!isDeleting) {
+                    showDeleteDialog = false
+                    deleteError = null
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun DangerZone(onDeleteRequested: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(HalqaColors.BgElevated)
+            .border(1.dp, HalqaColors.Pink.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .clickable(onClick = onDeleteRequested)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Column {
+            Text(
+                "حذف الحساب",
+                color = HalqaColors.Pink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "سيتم حذف حسابك وبياناتك بشكل دائم. لا يمكن التراجع عن هذا الإجراء.",
+                color = HalqaColors.TextMuted,
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeleteAccountDialog(
+    isLoading: Boolean,
+    error: String?,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "تأكيد حذف الحساب",
+                color = HalqaColors.Text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    "سيتم حذف البيانات التالية بشكل دائم:",
+                    color = HalqaColors.TextMuted,
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                BulletLine("الملف الشخصي والصورة")
+                BulletLine("المحفظة ورصيد الكوينز")
+                BulletLine("سجل البثوثات والهدايا")
+                BulletLine("سجل المحادثات والرسائل")
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "لا يمكن التراجع عن هذا الإجراء بعد إتمامه.",
+                    color = HalqaColors.Pink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(error, color = HalqaColors.Pink, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = HalqaColors.Pink,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                TextButton(onClick = onConfirm) {
+                    Text(
+                        "حذف حسابي نهائياً",
+                        color = HalqaColors.Pink,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isLoading) {
+                Text("إلغاء", color = HalqaColors.TextMuted)
+            }
+        },
+        containerColor = HalqaColors.BgElevated,
+    )
+}
+
+@Composable
+private fun BulletLine(text: String) {
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("•", color = HalqaColors.TextDim, fontSize = 14.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = HalqaColors.Text, fontSize = 13.sp)
     }
 }
 

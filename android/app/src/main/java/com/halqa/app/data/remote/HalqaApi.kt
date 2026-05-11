@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -26,6 +27,20 @@ interface HalqaApi {
 
     @POST("users/me")
     suspend fun updateMe(@Body body: UpdateProfileRequest): UserDto
+
+    /**
+     * Reem — Play 2024 in-app account-deletion requirement. The route
+     * performs the cascade server-side (revoke Firebase Auth, zero out
+     * /users/{uid}, soft-delete /wallets/{uid}, and write a
+     * `account_deleted` row to `/audit/{uid}/events`) so the Android
+     * client just needs to call this once, then sign out locally and
+     * route back to [Routes.Auth].
+     *
+     * Returns [SimpleOk] on success. Khalid owns the backend; this
+     * Retrofit method is the wire contract.
+     */
+    @DELETE("users/me")
+    suspend fun deleteMe(): SimpleOk
 
     @GET("settings")
     suspend fun getSettings(): SettingsDto
