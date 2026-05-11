@@ -107,22 +107,85 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     handle = hd.length > 0 ? hd : null;
   } else {
     // Self-create on first call.
+    //
+    // Layla LAYLA-002 — the closed-beta KYC bypass audit trail (Layla
+    // GR1 + GR2) is also written here, atomically, when this path
+    // fires while `BYPASS_KYC_FOR_BETA=true`. Background:
+    //
+    //   Android sign-in flows (phone / Google / email) call
+    //   [UserDocBootstrap.ensureUserDoc] which stamps `bypass_grant`
+    //   on `/users/{uid}` and mirrors a `kyc_bypass_granted` row into
+    //   `/audit/{uid}/events`. That client-side write is the primary
+    //   path. But [UserDocBootstrap] is documented to be **fail-open**
+    //   on Firestore read failures (Result.ReadFailed, see line ~85)
+    //   — when the initial read of `/users/{uid}` throws (offline,
+    //   transient quota, rule propagation lag), the Android side
+    //   silently returns without writing the doc, expecting this
+    //   backend lazy-create branch to fill it in on the first
+    //   authenticated REST call.
+    //
+    //   Pre-fix that fall-through wrote a user doc WITHOUT
+    //   `bypass_grant`. The /api/wallet/withdraw 403 hard-block
+    //   (Layla GR4) keys on `bypass_grant.will_reverify === true`,
+    //   so this cohort silently shipped as already-cleared even
+    //   though they were grandfathered. Same exploit shape as
+    //   PR #87 (which closed the immutability hole), just a
+    //   different write path.
+    //
+    // Authority model: when the Android client and the backend
+    // disagree about whether to stamp `bypass_grant`, the backend
+    // wins. Both code paths key on `BYPASS_KYC_FOR_BETA`; the env
+    // var is the source of truth. Android writes are a best-effort
+    // optimization to avoid the phantom-guest UI flicker — the
+    // backend lazy-create is the durable enforcement point.
+    //
+    // We write the user doc + the audit-event row in a single
+    // Firestore batch so the doc never exists in a half-stamped
+    // state ("user doc has bypass_grant but no audit row" or
+    // vice versa). Admin SDK bypasses firestore.rules so no
+    // rule changes are needed for the audit write.
     const initialDisplayName = (decoded.name || "").trim();
-    await userRef.set(
-      {
+    const bypassActive = process.env.BYPASS_KYC_FOR_BETA === "true";
+    const userDocPayload: Record<string, unknown> = {
+      uid,
+      email: decoded.email || null,
+      phoneNumber: decoded.phone_number || null,
+      displayName: initialDisplayName,
+      handle: "",
+      bio: "",
+      avatar: "",
+      role: "user",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (bypassActive) {
+      userDocPayload.bypass_grant = {
+        reason: "BETA_M0_BACKEND_LAZY_CREATE",
+        granted_at: new Date().toISOString(),
+        granted_via: "BYPASS_KYC_FOR_BETA",
+        will_reverify: true,
+      };
+    }
+
+    const db = adminFirestore();
+    const batch = db.batch();
+    batch.set(userRef, userDocPayload, { merge: true });
+    if (bypassActive) {
+      // Mirror the same grant into a separate, append-only audit
+      // trail at `/audit/{uid}/events/{auto}` (Layla GR2). Same
+      // schema the Android-side [UserDocBootstrap] writes — staff
+      // queries enumerate this collection without caring about the
+      // origin path.
+      const auditRef = db.collection("audit").doc(uid).collection("events").doc();
+      batch.set(auditRef, {
         uid,
-        email: decoded.email || null,
-        phoneNumber: decoded.phone_number || null,
-        displayName: initialDisplayName,
-        handle: "",
-        bio: "",
-        avatar: "",
-        role: "user",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+        type: "kyc_bypass_granted",
+        granted_at: new Date().toISOString(),
+        reason: "BETA_M0_BACKEND_LAZY_CREATE",
+        env_flag_value: true,
+      });
+    }
+    await batch.commit();
     displayName = initialDisplayName.length > 0 ? initialDisplayName : null;
   }
 
