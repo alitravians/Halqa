@@ -150,6 +150,44 @@ object AuthRepository {
         } catch (t: Throwable) {
             return AuthResult.Failure(mapAuthFailure(t))
         }
+
+        // Layla LAYLA-001 — close the email-path bypass of the T&S
+        // guardrails. Previously this branch resolved the role and
+        // navigated straight to the staff/main screen without ever
+        // running [UserDocBootstrap] or [SignupTelemetry], which meant:
+        //   - the GR1 `bypass_grant` map was never stamped (and the
+        //     /audit/{uid}/events row was never written) for users
+        //     signed up under BYPASS_KYC_FOR_BETA=true via the email
+        //     path, so the GR4 withdrawal hard-block + audit trail
+        //     never applied to this cohort;
+        //   - the GR5 daily signup cap never counted them, so a
+        //     determined operator could mint email accounts indefinitely
+        //     without tripping the closed-beta cap.
+        //
+        // Phone OTP + Google both call `ensureUserDoc` (then fire
+        // `SignupTelemetry.heartbeat` on Result.Created); the email
+        // path now mirrors that exactly. Staff accounts are pre-provisioned
+        // by an admin, so `ensureUserDoc` takes the Patched / Skipped
+        // branch for them — no heartbeat fires, no `bypass_grant` is
+        // written on top of an existing doc.
+        //
+        // SignupCapReachedException propagates up so the email sign-in
+        // screen can render the same locked-dialog the Phone + Google
+        // paths render (per GR5).
+        val bootstrapResult = UserDocBootstrap.ensureUserDoc(
+            uid = user.uid,
+            phoneNumber = null,
+            email = user.email ?: trimmed,
+            displayName = user.displayName,
+            avatar = null,
+        )
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            // `phoneCountryCode = null` matches the Google path; the
+            // server buckets unknown carriers separately for the
+            // staff dashboard breakdown.
+            SignupTelemetry.heartbeat(phoneCountryCode = null)
+        }
+
         val role = resolveRoleForUid(user.uid)
         val account = StaffAccount(
             id = user.uid,
