@@ -1,5 +1,46 @@
 import type { NextRequest } from "next/server";
+import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminFirestore } from "./firebase-admin";
+
+// PR-L (LAYLA-R2-001). Closed-beta daily signup cap mirror.
+//
+// Layla's GR5 caps signups at 20/UTC-day. The primary enforcement is
+// `/api/signup/heartbeat` which Android calls on UserDocBootstrap.Created.
+// But that heartbeat is bypassable: if the Android bootstrap hits
+// `Result.ReadFailed` (network / quota / rule-lag), the client silently
+// returns without calling heartbeat — and a tampered client that POSTs
+// to /users/{uid} directly through the Firestore SDK never calls
+// heartbeat at all. Either way, the user-doc gets created (here, in the
+// backend lazy-create branch below) but the counter never increments.
+//
+// This PR closes that gap: whenever the backend lazy-creates a /users/
+// doc (the only path that writes `bypass_grant` server-side), it ALSO
+// atomically increments /metrics/signups/days/{YYYY-MM-DD}.count inside
+// the same transaction. If the counter has already reached the cap, we
+// stamp `bypass_grant.over_cap=true` on the new doc — for cohort
+// tracking — but we DO NOT block the user from completing sign-in.
+// The Auth account already exists at this point (token verified
+// successfully); refusing the Firestore write would leave a phantom
+// user with no profile and the bypass_grant audit would never write.
+//
+// The 20/day cap is duplicated here rather than imported from
+// heartbeat/route.ts because lib/ should not import from app/api/
+// (Next.js layering); see comment on LAZY_CREATE_DAILY_CAP.
+const LAZY_CREATE_DAILY_CAP = 20;
+
+function lazyCreateTodayBucket(): string {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear().toString().padStart(4, "0");
+  const mm = (now.getUTCMonth() + 1).toString().padStart(2, "0");
+  const dd = now.getUTCDate().toString().padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function lazyCreateCarrierFromPhone(phone: string | null | undefined): string {
+  if (!phone || typeof phone !== "string") return "unknown";
+  const m = phone.trim().match(/^\+(\d{1,4})/);
+  return m ? `+${m[1]}` : "unknown";
+}
 
 export type UserRole = "user" | "scout" | "moderator" | "staff" | "admin";
 
@@ -155,46 +196,133 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     // rule changes are needed for the audit write.
     const initialDisplayName = (decoded.name || "").trim();
     const bypassActive = process.env.BYPASS_KYC_FOR_BETA === "true";
-    const userDocPayload: Record<string, unknown> = {
-      uid,
-      email: decoded.email || null,
-      phoneNumber: decoded.phone_number || null,
-      displayName: initialDisplayName,
-      handle: "",
-      bio: "",
-      avatar: "",
-      role: "user",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    if (bypassActive) {
-      userDocPayload.bypass_grant = {
-        reason: "BETA_M0_BACKEND_LAZY_CREATE",
-        granted_at: new Date().toISOString(),
-        granted_via: "BYPASS_KYC_FOR_BETA",
-        will_reverify: true,
-      };
-    }
+    const phoneNumber = decoded.phone_number || null;
+
+    // PR-L: atomic cap-counter integration. We perform the user-doc
+    // create + audit-event write + cap-counter increment in a single
+    // Firestore transaction. The txn reads the day-bucket FIRST so it
+    // knows whether the cap is hit BEFORE deciding whether to stamp
+    // bypass_grant.over_cap=true on the new user doc.
+    //
+    // Why a txn (not a batch.commit like before)? Because we need a
+    // read-before-write on the bucket to know prev count. A batch is
+    // write-only and would force us to choose between unconditional
+    // increment (which is fine for the counter itself but doesn't give
+    // us the prev value to set over_cap) and an unsafe two-step
+    // (read outside, increment inside batch — TOCTOU on the cap).
+    //
+    // What's NOT done here: blocking the user. Even when over_cap, we
+    // still create the user doc, write audit, and increment counter.
+    // The auth-Firebase user already exists at this point (we
+    // successfully verifyIdToken'd above) — leaving them without a
+    // Firestore profile would create the same phantom-guest class
+    // PR #78 closed. The Android client UI is the cap gate (heartbeat
+    // returns 423); this txn is the defence-in-depth metric.
+    const date = lazyCreateTodayBucket();
+    const carrier = lazyCreateCarrierFromPhone(phoneNumber);
+    const carrierField = `carriers.${carrier}`;
 
     const db = adminFirestore();
-    const batch = db.batch();
-    batch.set(userRef, userDocPayload, { merge: true });
-    if (bypassActive) {
-      // Mirror the same grant into a separate, append-only audit
-      // trail at `/audit/{uid}/events/{auto}` (Layla GR2). Same
-      // schema the Android-side [UserDocBootstrap] writes — staff
-      // queries enumerate this collection without caring about the
-      // origin path.
-      const auditRef = db.collection("audit").doc(uid).collection("events").doc();
-      batch.set(auditRef, {
+    const bucketRef = db
+      .collection("metrics")
+      .doc("signups")
+      .collection("days")
+      .doc(date);
+    const auditEventRef = db
+      .collection("audit")
+      .doc(uid)
+      .collection("events")
+      .doc();
+    const auditLogRef = db.collection("audit_log").doc();
+
+    await db.runTransaction(async (tx) => {
+      const bucketSnap = await tx.get(bucketRef);
+      const bucketData = bucketSnap.exists ? bucketSnap.data() ?? {} : {};
+      const prevCount = Number(bucketData.count ?? 0);
+      const overCap = prevCount >= LAZY_CREATE_DAILY_CAP;
+      const newCount = prevCount + 1;
+      const willLock = newCount >= LAZY_CREATE_DAILY_CAP;
+      const nowIso = new Date().toISOString();
+
+      const userDocPayload: Record<string, unknown> = {
         uid,
-        type: "kyc_bypass_granted",
-        granted_at: new Date().toISOString(),
-        reason: "BETA_M0_BACKEND_LAZY_CREATE",
-        env_flag_value: true,
+        email: decoded.email || null,
+        phoneNumber,
+        displayName: initialDisplayName,
+        handle: "",
+        bio: "",
+        avatar: "",
+        role: "user",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      if (bypassActive) {
+        userDocPayload.bypass_grant = {
+          reason: "BETA_M0_BACKEND_LAZY_CREATE",
+          granted_at: nowIso,
+          granted_via: "BYPASS_KYC_FOR_BETA",
+          will_reverify: true,
+          // PR-L cohort marker: this user signed up while the cap was
+          // already reached. Staff dashboards filter on this to identify
+          // the "over-cap cohort" — they got in despite the cap because
+          // the cap is documented as a soft signal, not a hard block.
+          over_cap: overCap,
+        };
+      }
+      tx.set(userRef, userDocPayload, { merge: true });
+
+      if (bypassActive) {
+        // Append-only audit-event row (Layla GR2). Same schema
+        // [UserDocBootstrap] writes from Android.
+        tx.set(auditEventRef, {
+          uid,
+          type: "kyc_bypass_granted",
+          granted_at: nowIso,
+          reason: "BETA_M0_BACKEND_LAZY_CREATE",
+          env_flag_value: true,
+          over_cap: overCap,
+        });
+      }
+
+      // Atomic cap-counter bump. FieldValue.increment is safe on first
+      // write (creates the counter at 1). The carrier sub-map uses the
+      // same dotted-path pattern as /api/signup/heartbeat so the staff
+      // dashboard's carrier-breakdown query keeps working unchanged.
+      tx.set(
+        bucketRef,
+        {
+          date,
+          count: FieldValue.increment(1),
+          [carrierField]: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+          ...(bucketSnap.exists
+            ? {}
+            : { createdAt: FieldValue.serverTimestamp() }),
+          signup_locked: willLock,
+          ...(willLock ? { locked_at: FieldValue.serverTimestamp() } : {}),
+        },
+        { merge: true }
+      );
+
+      // Audit_log mirror — same convention as
+      // /api/signup/heartbeat:signup_heartbeat, but action key
+      // 'signup_heartbeat_backend' makes the path easy to filter
+      // in staff investigations ("were these counted via Android
+      // or via the backend lazy-create fallback?").
+      tx.set(auditLogRef, {
+        userId: uid,
+        action: "signup_heartbeat_backend",
+        timestamp: nowIso,
+        metadata: {
+          carrier,
+          dailyBucket: date,
+          countAfter: newCount,
+          locked: willLock,
+          over_cap: overCap,
+          source: "auth.requireUser_lazy_create",
+        },
       });
-    }
-    await batch.commit();
+    });
     displayName = initialDisplayName.length > 0 ? initialDisplayName : null;
   }
 
