@@ -48,28 +48,61 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn() && (uid() == userId || isStaff());
 
-      // user can create own doc on first sign-in (server-side or client-side)
+      // user can create own doc on first sign-in (server-side or client-side).
+      //
+      // `bypass_grant` is a privilege field gating the GR4 withdrawal
+      // block (see backend wallet/withdraw/route.ts). The closed-beta
+      // bootstrap stamps `bypass_grant: { will_reverify: true, ... }`
+      // on first sign-in (see UserDocBootstrap.kt). The CREATE rule
+      // here forces the same shape — if the client includes
+      // `bypass_grant` in the create body, `will_reverify` MUST be
+      // `true`. A malicious client trying to stamp `will_reverify:
+      // false` (or any other shape) on create to grandfather-then-
+      // cashout is rejected at the rule level rather than relying on
+      // the after-the-fact server reconciliation.
       allow create: if isOwner(userId)
         && request.resource.data.role == 'user'
-        && request.resource.data.uid == userId;
+        && request.resource.data.uid == userId
+        && (
+          !('bypass_grant' in request.resource.data)
+          || request.resource.data.bypass_grant.will_reverify == true
+        );
 
-      // user can update profile fields. role/createdAt/uid stay immutable on
-      // the self-update path so a regular user can never tamper with their
-      // own privilege markers.
+      // Owner self-update — allowlist of writable fields.
       //
-      // Layla GR3 — `dob` (ISO date string self-attested in
-      // [DateOfBirthScreen]) and `dob_attested_at` (server timestamp
-      // for the same write) are also immutable once set, so a user
-      // who under-attested at sign-up can't later "promote" themselves
-      // past the broadcaster ≥18 gate by editing the field. The
-      // first-write path is permitted because `resource.data.dob`
-      // doesn't exist yet — `resource.data.get('dob', '') == ''`
-      // returns the default sentinel. Subsequent updates must keep
-      // the field bit-identical or omit it entirely.
+      // This rule inverts the previous "denylist of privilege fields"
+      // model. The earlier shape (`role/createdAt/uid` immutable, all
+      // else free) was a foot-gun: every new field added to the user
+      // doc was implicitly writable by the owner unless explicitly
+      // banned. The withdraw-route comment (route.ts line 73-78)
+      // acknowledged this: "until that rule is tightened, the manual
+      // re-KYC flow that clears `will_reverify` MUST go through the
+      // Admin SDK so a malicious client cannot self-clear the gate".
+      // KHALID-001: tighten the rule.
+      //
+      // After this change, the ONLY fields a regular user can write
+      // through the self-update path are the public profile fields
+      // and the one-shot dob attestation. Every privilege-related
+      // field — `role`, `bypass_grant`, `banned`, `shadowBan`,
+      // `kyc_status_override`, and every future privilege marker —
+      // is implicitly immutable because it is not in the allowlist.
+      // To extend the surface, add a field name here AND prove that
+      // letting the user write it cannot escalate privilege, bypass
+      // a moderation gate, or forge an audit trail.
+      //
+      // dob / dob_attested_at retain Layla GR3 one-shot semantics: a
+      // first write is permitted (the field doesn't exist yet), but
+      // subsequent updates must keep the field bit-identical or omit
+      // it. A user who under-attested at sign-up can't later "promote"
+      // themselves past the broadcaster ≥18 gate by editing the field.
       allow update: if isOwner(userId)
-        && request.resource.data.role == resource.data.role
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly([
+               'displayName', 'handle', 'bio', 'avatar',
+               'phoneNumber', 'email',
+               'dob', 'dob_attested_at',
+               'updatedAt'
+             ])
         && (
           !('dob' in resource.data)
           || request.resource.data.dob == resource.data.dob
@@ -79,22 +112,46 @@ service cloud.firestore {
           || request.resource.data.dob_attested_at == resource.data.dob_attested_at
         );
 
-      // staff can promote/demote OTHER users for moderation tooling, but
-      // never themselves (blocks the self-escalation `staff -> admin`
-      // foot-gun) and never beyond `staff` (granting `admin` is reserved
-      // for an existing admin via the rule below). uid + createdAt remain
-      // immutable so audit trails stay intact.
+      // Staff can change `role` on OTHER users for moderation tooling.
+      //
+      // The previous rule allowed staff to update any field on any
+      // non-self user as long as `uid` / `createdAt` were preserved
+      // and `role` stayed inside the allowed enum. That was wider
+      // than intended: a tampered staff SDK client (or a leaked
+      // staff token) could clear `bypass_grant.will_reverify` on any
+      // other user, forge `banned: true` directly without writing to
+      // `/bans/{banId}`, edit `dob` to bypass the ≥18 gate, or stuff
+      // arbitrary fields into someone else's doc — all without
+      // landing an `/audit_log` row, because client-side writes
+      // cannot touch the server-only-write audit collection.
+      //
+      // KHALID-002: lock the staff path to `role` (and the conventional
+      // `updatedAt` bump that goes with any moderation write). Every
+      // OTHER mutation a staff member needs to perform — banning,
+      // un-banning, clearing a bypass grant after re-KYC review,
+      // adjusting a profile for compliance — MUST go through a
+      // server endpoint that writes `/audit_log` atomically. The
+      // endpoint can use the Admin SDK to bypass these rules; the
+      // direct client path stays narrow.
+      //
+      // Self-promotion is still blocked (`uid() != userId`); granting
+      // `admin` is still reserved for an existing admin via the rule
+      // below. uid + createdAt are implicitly immutable through the
+      // allowlist (they are not in `hasOnly([...])`).
       allow update: if isStaff()
         && uid() != userId
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['role', 'updatedAt'])
         && request.resource.data.role in ['user', 'scout', 'moderator', 'staff'];
 
-      // admin can update any user (including themselves) and grant any
-      // role. uid + createdAt are still immutable.
+      // Admin can change `role` (any value, including `admin`) and
+      // `bypass_grant` (e.g. clearing `will_reverify` after a manual
+      // re-KYC review). Every other moderation mutation still goes
+      // through a server endpoint so `/audit_log` fires. uid +
+      // createdAt are implicitly immutable through the allowlist.
       allow update: if isAdmin()
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.createdAt == resource.data.createdAt;
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['role', 'bypass_grant', 'updatedAt']);
 
       // admin only delete
       allow delete: if isAdmin();
@@ -299,8 +356,27 @@ service cloud.firestore {
     // gate so we don't lose the safety property):
     //   - owner can create only their own events (`isOwner(userId)`),
     //   - `uid` field MUST match the path segment (no impersonation),
-    //   - `type` is a string with `size <= 64` (defeats doc-bloat DoS,
-    //     same class as PR #54 streamTitle / #58 KYC fullName cap),
+    //   - `type` is restricted to a small allowlist of grant-time
+    //     event names. KHALID-003: the previous rule accepted any
+    //     string ≤ 64 chars as a `type`, so a malicious client could
+    //     plant forged entries (`type: "moderator_warned"`,
+    //     `type: "kyc_approved"`) against their OWN audit subcoll —
+    //     staff investigators reading the per-user trail would see
+    //     a forged moderation history. The allowlist below is the
+    //     full set of legitimate client-write event types:
+    //       - `kyc_bypass_granted`  — UserDocBootstrap on first
+    //         sign-in under the closed-beta KYC bypass (GR2).
+    //       - `dob_attested`        — DateOfBirthScreen on first
+    //         dob attestation (GR3).
+    //     Adding a new client-write event type requires extending
+    //     this allowlist AND proving that letting the user self-stamp
+    //     it cannot forge a moderation trail. Server-written audit
+    //     rows belong in `/audit_log` (Admin SDK only, server-only
+    //     writes), not here.
+    //   - the doc must contain ONLY the fields below (hasOnly()), so
+    //     a user cannot stuff a forged `granted_by_staff_uid` /
+    //     `moderator_uid` / `severity` into a "moderator_warned"
+    //     entry. Same doc-bloat-DoS class as PR #54 streamTitle.
     //   - update + delete forbidden (append-only audit).
     //
     // Reads: owner can see their own audit, staff can read everyone's
@@ -310,7 +386,12 @@ service cloud.firestore {
       allow create: if isOwner(userId)
         && request.resource.data.uid == userId
         && request.resource.data.type is string
-        && request.resource.data.type.size() <= 64;
+        && request.resource.data.type in ['kyc_bypass_granted', 'dob_attested']
+        && request.resource.data.keys().hasOnly([
+             'uid', 'type',
+             'granted_at', 'dob_attested_at',
+             'reason', 'env_flag_value', 'dob_year_only'
+           ]);
       allow update: if false;
       allow delete: if false;
     }
