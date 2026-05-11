@@ -96,6 +96,15 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
   let handle: string | null = null;
   if (snap.exists) {
     const data = snap.data() ?? {};
+    // PR-K: self-service account deletion is a soft-delete that
+    // anonymizes the user doc and deletes the Firebase Auth user.
+    // The Auth-delete invalidates new sign-ins, but JWTs issued
+    // before deletion remain valid for ~1h (token expiry) unless
+    // we explicitly check {checkRevoked: true} or block here.
+    // Block here — fail-closed.
+    if (data.deleted === true) {
+      throw new HttpError(403, "Account has been deleted.");
+    }
     role = (data.role || "user") as UserRole;
     // Read PII-safe profile fields from the same snapshot we already
     // fetched for role. Coerced to non-empty string-or-null so callers
