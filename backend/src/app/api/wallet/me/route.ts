@@ -33,7 +33,10 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — banned user reading their own wallet balance is
+    // transparency, not abuse. Spending paths (gifts/send, topup,
+    // withdraw) are gated separately.
+    const user = await requireUser(req, { allowBanned: true });
     const db = adminFirestore();
     const ref = db.collection("wallets").doc(user.uid);
     const snap = await ref.get();

@@ -144,14 +144,25 @@ service cloud.firestore {
              .hasOnly(['role', 'updatedAt'])
         && request.resource.data.role in ['user', 'scout', 'moderator', 'staff'];
 
-      // Admin can change `role` (any value, including `admin`) and
+      // Admin can change `role` (any value, including `admin`),
       // `bypass_grant` (e.g. clearing `will_reverify` after a manual
-      // re-KYC review). Every other moderation mutation still goes
-      // through a server endpoint so `/audit_log` fires. uid +
-      // createdAt are implicitly immutable through the allowlist.
+      // re-KYC review), and the PR-H ban fields (`banned`,
+      // `ban_reason`, `banned_by`, `banned_at`) for emergency
+      // console-side ban toggles. The normal ban path is the API
+      // route `/api/admin/users/{uid}/ban` (Admin SDK, audit row +
+      // /bans/ row in one txn). The rule allowlist is the
+      // defence-in-depth gate when an admin uses the Firestore
+      // console directly — without it, a console ban would write
+      // /users/{uid}.banned but skip the /audit_log row, so we
+      // intentionally keep both paths working but document the
+      // route as preferred. uid + createdAt are implicitly
+      // immutable through the allowlist.
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['role', 'bypass_grant', 'updatedAt']);
+             .hasOnly([
+               'role', 'bypass_grant', 'updatedAt',
+               'banned', 'ban_reason', 'banned_by', 'banned_at'
+             ]);
 
       // admin only delete
       allow delete: if isAdmin();

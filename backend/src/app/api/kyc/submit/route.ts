@@ -47,7 +47,10 @@ const MAX_DOC_NUMBER = 64;
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — kyc/submit is the appeal path. Banned users MUST be
+    // able to submit KYC to lift their ban; gating here would create
+    // a deadlock (banned because no KYC, can't submit KYC because banned).
+    const user = await requireUser(req, { allowBanned: true });
     const body = (await req.json()) as Partial<KycBody>;
 
     if (!body.identityType || !["national_id", "passport", "iqama"].includes(body.identityType)) {

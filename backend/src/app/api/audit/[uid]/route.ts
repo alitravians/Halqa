@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, ctx: { params: Promise<{ uid: string }> }) {
   try {
     const { uid: targetUid } = await ctx.params;
-    const user = await requireUser(req);
+    // PR-H — reading own audit log is a PDPL-style transparency right.
+    const user = await requireUser(req, { allowBanned: true });
     if (user.uid !== targetUid && !isStaff(user)) {
       throw new HttpError(403, "Not authorized to read this audit log.");
     }
