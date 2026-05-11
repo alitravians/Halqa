@@ -71,12 +71,42 @@ object UserDocBootstrap {
         ReadFailed,
     }
 
+    /**
+     * Audit-trail labels stamped on [Result.Created] writes into both
+     * `/users/{uid}.bypass_grant.reason` and the matching
+     * `/audit/{uid}/events` row.
+     *
+     * Each sign-in provider passes its own value so a Trust & Safety
+     * investigator can answer "which sign-in path admitted this user
+     * under the closed-beta KYC bypass" by reading a single field —
+     * the alternative is grepping `/audit_log` for the surrounding
+     * action and is unreliable for users who never interact with
+     * audited endpoints afterwards.
+     *
+     * The Firestore rule on `/audit/{uid}/events` accepts any string
+     * value for `reason` (the rule only constrains `type` to a closed
+     * set), so adding labels here is safe without a rules deploy.
+     *
+     * Layla GR1 (bypass_grant on the user doc) and GR2 (independent
+     * audit event) must use the SAME reason string per call — both
+     * are stamped from the same enum slot below.
+     */
+    enum class BypassReason(val wire: String) {
+        /** Phone OTP path via [PhoneAuthRepository]. */
+        PhoneOtp("BETA_M0_PHONE_OTP"),
+        /** Google sign-in path via [GoogleAuthRepository]. */
+        GoogleSignIn("BETA_M0_GOOGLE_SIGNIN"),
+        /** Email / password sign-in path via [AuthRepository]. */
+        EmailSignIn("BETA_M0_EMAIL_SIGNIN"),
+    }
+
     suspend fun ensureUserDoc(
         uid: String,
         phoneNumber: String?,
         email: String?,
         displayName: String? = null,
         avatar: String? = null,
+        bypassReason: BypassReason = BypassReason.PhoneOtp,
     ): Result {
         val firestore = FirebaseFirestore.getInstance()
         val ref = firestore.collection("users").document(uid)
@@ -160,7 +190,7 @@ object UserDocBootstrap {
         // round-trip) so the doc never exists in a half-stamped state.
         if (BuildConfig.BYPASS_KYC_FOR_BETA) {
             doc["bypass_grant"] = mapOf(
-                "reason" to "BETA_M0_PHONE_OTP",
+                "reason" to bypassReason.wire,
                 "granted_at" to FieldValue.serverTimestamp(),
                 "granted_via" to "BYPASS_KYC_FOR_BETA",
                 "will_reverify" to true,
@@ -196,7 +226,7 @@ object UserDocBootstrap {
                             "uid" to uid,
                             "type" to "kyc_bypass_granted",
                             "granted_at" to FieldValue.serverTimestamp(),
-                            "reason" to "BETA_M0_PHONE_OTP",
+                            "reason" to bypassReason.wire,
                             "env_flag_value" to true,
                         ),
                     )

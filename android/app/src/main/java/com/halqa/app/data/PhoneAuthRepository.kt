@@ -158,6 +158,7 @@ object PhoneAuthRepository {
             uid = uid,
             phoneNumber = e164PhoneNumber,
             email = null,
+            bypassReason = UserDocBootstrap.BypassReason.PhoneOtp,
         )
         // Layla's GR5: fire the per-day signup heartbeat ONLY when this
         // call actually created the user doc. Return sign-ins (Patched /
