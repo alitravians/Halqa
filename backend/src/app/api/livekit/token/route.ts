@@ -92,6 +92,49 @@ function normaliseStreamTitle(
   return { ok: true, value: trimmed };
 }
 
+/**
+ * Compute the broadcaster's age in completed years from a `dob`
+ * stored as a UTC ISO date string ("YYYY-MM-DD" — the format written
+ * by the Android `DateOfBirthScreen.persistDob`). Returns `null` if
+ * the input is malformed; the caller turns `null` into HTTP 403
+ * `DOB_INVALID` (the server-side gate is strict — unlike the
+ * Android client gate which falls through to allow on malformed
+ * input, we refuse here because there is no slower-paced UI to
+ * recover through).
+ *
+ * Mirrors the Android computeAgeYearsFromIsoDob in
+ * `GoLivePrepScreen.kt` deliberately: same UTC calendar, same
+ * "completed years" semantics. Keeping the two implementations
+ * functionally identical means a date that the client picker
+ * accepted will never be rejected by this server-side parser as
+ * malformed, and a client-side ≥18 verdict matches the server-side
+ * verdict exactly (no edge-case timezone drift letting a 17-year-old
+ * pass the client gate but fail the server gate or vice versa).
+ */
+function computeAgeYearsFromIsoDob(iso: string): number | null {
+  const parts = iso.split("-");
+  if (parts.length !== 3) return null;
+  const y = Number.parseInt(parts[0], 10);
+  const m = Number.parseInt(parts[1], 10);
+  const d = Number.parseInt(parts[2], 10);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
+    return null;
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  // UTC "today" — matches the picker's UTC calendar so a stream
+  // started from a UTC-ahead timezone doesn't see a one-day skew.
+  const now = new Date();
+  const curY = now.getUTCFullYear();
+  const curM = now.getUTCMonth() + 1;
+  const curD = now.getUTCDate();
+  let years = curY - y;
+  if (curM < m || (curM === m && curD < d)) {
+    years -= 1;
+  }
+  if (years < 0 || years > 200) return null;
+  return years;
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Refuse to issue any tokens if a deploy left the unsafe combo
@@ -165,6 +208,67 @@ export async function POST(req: NextRequest) {
             "Publisher access requires approved KYC. Submit KYC and wait for review."
           );
         }
+      }
+
+      // Layla GR3 — server-side broadcaster ≥18 gate.
+      //
+      // The Android client at `GoLivePrepScreen.launchBroadcast()` has
+      // its own client-side gate, but that gate is intentionally
+      // permissive on the "Firestore read still in flight" path
+      // (`dobLoaded == false` → fall through to broadcast so a slow
+      // network doesn't block known-adult users). It is also permissive
+      // when `computeAgeYearsFromIsoDob()` returns null on a malformed
+      // string. Either path lets a 17-year-old who taps "ابدأ البث"
+      // fast enough — or any non-Android client (web, direct curl,
+      // a tampered APK) — slip past the gate entirely.
+      //
+      // This server-side gate is the durable enforcement. It reads
+      // the same `/users/{uid}.dob` field the client writes from
+      // `DateOfBirthScreen.persistDob` and parses it the same way.
+      // The order of checks:
+      //
+      //   1. user doc missing            → 403 DOB_NOT_ATTESTED
+      //                                    (closed-beta v0.1.20/v0.1.21
+      //                                    grandfathered users — the
+      //                                    Android client routes them
+      //                                    through DateOfBirthScreen
+      //                                    once on v0.1.22 first-launch,
+      //                                    but a non-Android caller
+      //                                    must be turned away).
+      //   2. `dob` absent / blank        → 403 DOB_NOT_ATTESTED.
+      //   3. `dob` malformed             → 403 DOB_INVALID.
+      //   4. age < 18                    → 403 BROADCASTER_UNDERAGE.
+      //   5. age ≥ 18                    → fall through to room-name
+      //                                    + atomic-create block.
+      //
+      // Why a separate read instead of folding into the transaction
+      // below: the room-create txn already does its own reads/writes;
+      // adding another collection's read to that txn inflates the
+      // contention surface and obscures the audit trail. The dob
+      // field is immutable from the client (firestore rule on
+      // /users/{uid} self-update locks both `dob` and `dob_attested_at`),
+      // so we can read it outside the txn without TOCTOU risk.
+      const userSnap = await db.collection("users").doc(user.uid).get();
+      const userData = userSnap.exists ? userSnap.data() ?? {} : {};
+      const rawDob = userData.dob;
+      if (typeof rawDob !== "string" || rawDob.trim().length === 0) {
+        throw new HttpError(
+          403,
+          "DOB_NOT_ATTESTED — date of birth must be attested before broadcasting."
+        );
+      }
+      const ageYears = computeAgeYearsFromIsoDob(rawDob.trim());
+      if (ageYears === null) {
+        throw new HttpError(
+          403,
+          "DOB_INVALID — stored date of birth is malformed. Contact support."
+        );
+      }
+      if (ageYears < 18) {
+        throw new HttpError(
+          403,
+          "BROADCASTER_UNDERAGE — broadcasting requires age 18 or older."
+        );
       }
 
       // P0 — room name MUST belong to this user. Reject squatting/impersonation.
