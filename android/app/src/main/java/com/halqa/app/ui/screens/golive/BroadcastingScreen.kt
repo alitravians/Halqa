@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.halqa.app.data.Analytics
+import com.halqa.app.data.OnboardingPrefs
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.livekit.BroadcastSession
 import com.halqa.app.livekit.BroadcastState
@@ -99,6 +101,21 @@ fun BroadcastingScreen(navController: NavController) {
                 BroadcastSession.stop()
             }
             else -> Unit
+        }
+    }
+
+    // Lina — broadcaster-side activation event. Fires exactly ONCE per
+    // install the first time `giftTotal` on this broadcaster's stream
+    // doc transitions to >0 (their very first gift on Halqa). Idempotent
+    // across re-broadcasts and re-launches via OnboardingPrefs.
+    val giftTotalNow = streamSnapshot?.giftTotal ?: 0L
+    LaunchedEffect(giftTotalNow, streamId) {
+        if (giftTotalNow > 0L &&
+            streamId.isNotBlank() &&
+            !OnboardingPrefs.wasFirstGiftReceivedFired()
+        ) {
+            Analytics.firstGiftReceived(streamId = streamId)
+            OnboardingPrefs.markFirstGiftReceivedFired()
         }
     }
 

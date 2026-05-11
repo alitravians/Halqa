@@ -96,6 +96,15 @@ object GoogleAuthRepository {
         if (bootstrapResult == UserDocBootstrap.Result.Created) {
             SignupTelemetry.heartbeat(phoneCountryCode = null)
         }
+        // Lina — analytics user-tagging + conversion event. Same
+        // pattern as Phone OTP: `sign_up` for Created, `login` for
+        // every other branch.
+        Analytics.setUser(uid)
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            Analytics.signUp(method = "google")
+        } else {
+            Analytics.login(method = "google")
+        }
         return uid
     }
 }

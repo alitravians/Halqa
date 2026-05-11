@@ -187,6 +187,16 @@ object AuthRepository {
             // staff dashboard breakdown.
             SignupTelemetry.heartbeat(phoneCountryCode = null)
         }
+        // Lina — analytics user-tagging + conversion event. Email path
+        // sees both `sign_up` (new account, including diaspora users)
+        // and `login` (existing staff accounts). Method = "email" so
+        // the funnel partitions cleanly from "phone" / "google".
+        Analytics.setUser(user.uid)
+        if (bootstrapResult == UserDocBootstrap.Result.Created) {
+            Analytics.signUp(method = "email")
+        } else {
+            Analytics.login(method = "email")
+        }
 
         val role = resolveRoleForUid(user.uid)
         val account = StaffAccount(

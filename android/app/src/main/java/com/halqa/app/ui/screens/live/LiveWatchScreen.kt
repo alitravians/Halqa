@@ -51,10 +51,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import com.halqa.app.data.Analytics
 import com.halqa.app.data.ChatMsg
 import com.halqa.app.data.ChatRepository
 import com.halqa.app.data.GiftRepository
 import com.halqa.app.data.MockData
+import com.halqa.app.data.OnboardingPrefs
 import com.halqa.app.data.StreamsRepository
 import com.halqa.app.data.remote.GiftDto
 import com.halqa.app.data.remote.humanize
@@ -154,6 +156,18 @@ fun LiveWatchScreen(streamId: String, navController: NavController) {
     DisposableEffect(streamId) {
         WatchSession.start(context.applicationContext, streamId, ownerUid = null)
         onDispose { WatchSession.stop() }
+    }
+
+    // Lina — one-shot activation event. Fires the first time the
+    // viewer's WatchSession transitions to Watching, regardless of
+    // which stream caused it. Subsequent streams (or a re-open of the
+    // same one) are no-ops because OnboardingPrefs.markFirstStreamFired
+    // is durable across the entire install.
+    LaunchedEffect(state) {
+        if (state is WatchState.Watching && !OnboardingPrefs.wasFirstStreamFired()) {
+            Analytics.firstStreamWatched(streamId = streamId)
+            OnboardingPrefs.markFirstStreamFired()
+        }
     }
 
     when (val s = state) {
