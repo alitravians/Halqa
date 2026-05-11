@@ -381,17 +381,64 @@ service cloud.firestore {
     //
     // Reads: owner can see their own audit, staff can read everyone's
     // for incident investigation. No public read.
+    // KHALID-R2-003 — pin client-supplied timestamps to request.time
+    // and fence the type-vs-payload pairing.
+    //
+    // Pre-fix gaps:
+    //
+    //   (a) Client could plant arbitrary `granted_at` / `dob_attested_at`
+    //       values — including ones years in the past ("backdate the
+    //       grant") or years in the future. Trust & Safety query the
+    //       /audit/{uid}/events trail directly during investigations,
+    //       so a forged timestamp degrades the audit's trustworthiness.
+    //
+    //   (b) Client could write `type: 'kyc_bypass_granted'` while
+    //       attaching `dob_attested_at` + `dob_year_only` fields (the
+    //       dob-attestation payload) or vice versa. The hasOnly() set
+    //       admitted both schemas under either type, so a single forged
+    //       row could pretend to be both events at once.
+    //
+    //   (c) `env_flag_value` was unconstrained; a client could write
+    //       `false` and make it look like the grant happened when the
+    //       beta flag was OFF (i.e. the grant should not have been
+    //       issued).
+    //
+    // The legitimate Android writers ([UserDocBootstrap] and
+    // [DateOfBirthScreen.persistDob]) already write the timestamps via
+    // `FieldValue.serverTimestamp()`, which Firestore replaces with
+    // `request.time` at commit — so `granted_at == request.time` is
+    // compatible with every legit write and rejects every hand-crafted
+    // forgery. The two type-specific keysets enforce the pairing so a
+    // "kyc_bypass_granted" row carries only grant fields and a
+    // "dob_attested" row carries only attestation fields.
     match /audit/{userId}/events/{eventId} {
       allow read: if isOwner(userId) || isStaff();
       allow create: if isOwner(userId)
         && request.resource.data.uid == userId
         && request.resource.data.type is string
-        && request.resource.data.type in ['kyc_bypass_granted', 'dob_attested']
-        && request.resource.data.keys().hasOnly([
-             'uid', 'type',
-             'granted_at', 'dob_attested_at',
-             'reason', 'env_flag_value', 'dob_year_only'
-           ]);
+        && (
+          (
+            // kyc_bypass_granted — only the grant payload, granted_at
+            // must equal request.time, env_flag_value must be true.
+            request.resource.data.type == 'kyc_bypass_granted'
+            && request.resource.data.keys().hasOnly([
+                 'uid', 'type', 'granted_at', 'reason', 'env_flag_value'
+               ])
+            && request.resource.data.granted_at == request.time
+            && request.resource.data.env_flag_value == true
+          )
+          ||
+          (
+            // dob_attested — only the attestation payload,
+            // dob_attested_at must equal request.time, dob_year_only
+            // optional but if present must be a small int (sanity).
+            request.resource.data.type == 'dob_attested'
+            && request.resource.data.keys().hasOnly([
+                 'uid', 'type', 'dob_attested_at', 'dob_year_only'
+               ])
+            && request.resource.data.dob_attested_at == request.time
+          )
+        );
       allow update: if false;
       allow delete: if false;
     }
