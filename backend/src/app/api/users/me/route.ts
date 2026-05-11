@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { adminFirestore } from "@/lib/firebase-admin";
 import { asError, asJson, HttpError, requireUser } from "@/lib/auth";
+import {
+  isReservedDisplayName,
+  isReservedHandle,
+} from "@/lib/reserved-names";
+import { classifyText } from "@/lib/word-filter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,10 +51,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // PR-J gates: display-name + bio profanity, reserved display-name,
+    // reserved handle. Profanity HARD-hits reject the request; for
+    // displayName SOFT hits also reject (profile is persistent; chat
+    // is ephemeral so chat tolerates 'soft').
+    if (typeof update.displayName === "string") {
+      if (isReservedDisplayName(update.displayName)) {
+        throw new HttpError(
+          400,
+          "Display name impersonates Halqa staff or a reserved role. Pick another."
+        );
+      }
+      const dn = classifyText(update.displayName);
+      if (dn.classification !== "clean") {
+        throw new HttpError(
+          400,
+          "Display name contains disallowed words. Pick another."
+        );
+      }
+    }
+    if (typeof update.bio === "string") {
+      const bio = classifyText(update.bio);
+      if (bio.classification === "hard") {
+        throw new HttpError(400, "Bio contains disallowed words.");
+      }
+    }
+
     if (typeof body.handle === "string" && body.handle.length > 0) {
       const h = body.handle.trim().replace(/^@/, "");
       if (!/^[a-zA-Z0-9_]{2,24}$/.test(h)) {
         throw new HttpError(400, "handle must be 2-24 chars, alphanumeric + underscore.");
+      }
+      if (isReservedHandle(h)) {
+        throw new HttpError(
+          400,
+          "That handle is reserved (Halqa staff / system roles). Pick another."
+        );
       }
       update.handle = h;
     }
