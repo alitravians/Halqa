@@ -58,6 +58,36 @@ export interface AuthedUser {
   /** Public handle (e.g. "@aliali"). Safe to surface alongside displayName. */
   handle: string | null;
   role: UserRole;
+  /**
+   * PR-H — fast-path ban state read from `/users/{uid}.banned`. Mirror
+   * of the `active==true` rows in `/bans/` written by the admin/mod
+   * ban endpoint inside the same Firestore txn. Endpoints that gate
+   * banned users (gifts/send, wallet/topup, livekit/token, etc) read
+   * this from the AuthedUser to avoid a second Firestore round-trip.
+   * Exempt endpoints (kyc/submit, users/me, settings, audit/[uid],
+   * streams/end) ignore the field.
+   */
+  banned: boolean;
+}
+
+/**
+ * Options for {@link requireUser}.
+ */
+export interface RequireUserOptions {
+  /**
+   * PR-H — when `true`, requireUser does NOT 403 a banned user. Use
+   * this on endpoints that must remain reachable while banned (the
+   * appeal/cleanup paths documented in `bans.ts`: kyc/submit,
+   * users/me, settings, audit/[uid], streams/end, wallet/me-GET).
+   *
+   * Default is `false` (fail-closed). Adding a new endpoint? Decide
+   * deliberately: most endpoints should NOT pass this. If you're not
+   * sure, leave it off — the worst case is a banned user gets a 403
+   * on a path you'd rather they not, which is reversible. The opposite
+   * (silently letting a banned user reach a gated endpoint) is a
+   * moderation bypass.
+   */
+  allowBanned?: boolean;
 }
 
 const STAFF_ROLES: UserRole[] = ["staff", "admin"];
@@ -71,7 +101,10 @@ function readBearerToken(req: NextRequest): string | null {
 }
 
 /** Verifies the Firebase ID token, loads role from Firestore. */
-export async function requireUser(req: NextRequest): Promise<AuthedUser> {
+export async function requireUser(
+  req: NextRequest,
+  opts: RequireUserOptions = {}
+): Promise<AuthedUser> {
   const token = readBearerToken(req);
   if (!token) {
     throw new HttpError(401, "Missing Authorization Bearer token.");
@@ -135,6 +168,7 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
   let role: UserRole = "user";
   let displayName: string | null = null;
   let handle: string | null = null;
+  let banned = false;
   if (snap.exists) {
     const data = snap.data() ?? {};
     // PR-K: self-service account deletion is a soft-delete that
@@ -155,6 +189,13 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     const hd = typeof data.handle === "string" ? data.handle.trim() : "";
     displayName = dn.length > 0 ? dn : null;
     handle = hd.length > 0 ? hd : null;
+
+    // PR-H — fast-path ban state mirror of /bans/{...}.active==true.
+    // Written by /api/admin/users/{uid}/ban inside the same txn as
+    // the /bans/ row + audit_log. The strict === true check rejects
+    // truthy non-booleans (string "true", number 1) that a tampered
+    // doc might carry — only a deliberate boolean true is a ban.
+    banned = data.banned === true;
 
     // KHALID-R2-002 — backfill bypass_grant when the doc exists but
     // the field is missing.
@@ -395,6 +436,30 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     displayName = initialDisplayName.length > 0 ? initialDisplayName : null;
   }
 
+  // PR-H — global ban gate (fail-closed).
+  //
+  // After the user-doc snapshot is read and `banned` is populated, a
+  // banned user is 403'd here for every authed endpoint UNLESS the
+  // endpoint passes `{ allowBanned: true }`. The exempt list (see
+  // `bans.ts` doc comment + `RequireUserOptions.allowBanned` JSDoc):
+  //
+  //   kyc/submit    — appeal path
+  //   users/me      — profile updates (correct handle, etc)
+  //   settings      — preferences, no abuse vector
+  //   audit/[uid]   — own audit log read
+  //   streams/end   — clean up own running stream
+  //   wallet/me-GET — see own balance
+  //
+  // Every other endpoint receives the default `allowBanned: false`
+  // and 403s on the ban. The error message intentionally matches the
+  // existing `assertNotBanned()` helper in `bans.ts` so the Android
+  // client's `Throwable.humanize` localisation path stays consistent
+  // across both code paths (gradual migration from per-endpoint
+  // assertNotBanned to global requireUser gate).
+  if (banned && !opts.allowBanned) {
+    throw new HttpError(403, "Account is banned.");
+  }
+
   return {
     uid,
     email: decoded.email || null,
@@ -402,6 +467,7 @@ export async function requireUser(req: NextRequest): Promise<AuthedUser> {
     displayName,
     handle,
     role,
+    banned,
   };
 }
 

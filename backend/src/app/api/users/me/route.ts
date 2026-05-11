@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — banned users still need to read their own profile to
+    // see ban status / appeal context in the UI.
+    const user = await requireUser(req, { allowBanned: true });
     const snap = await adminFirestore().collection("users").doc(user.uid).get();
     return asJson(200, snap.data() ?? { uid: user.uid, role: "user" });
   } catch (err) {
@@ -25,7 +27,10 @@ const ALLOWED_KEYS = ["displayName", "bio", "avatar"] as const;
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — profile edits (display name, bio, avatar) are not the
+    // action a ban targets. A banned user correcting their handle
+    // while suspended is harmless and not the moderation surface.
+    const user = await requireUser(req, { allowBanned: true });
     const body = (await req.json()) as Record<string, unknown>;
 
     const now = new Date().toISOString();

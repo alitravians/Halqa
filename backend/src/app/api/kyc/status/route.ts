@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — banned user reading their own KYC status (sibling of
+    // the appeal-path kyc/submit). Same allowlist.
+    const user = await requireUser(req, { allowBanned: true });
     const snap = await adminFirestore().collection("kyc_submissions").doc(user.uid).get();
     if (!snap.exists) {
       return asJson(200, { status: "none" });

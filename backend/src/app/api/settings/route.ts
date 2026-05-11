@@ -29,7 +29,9 @@ function settingsRef(uid: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — settings (language, theme, notifications) have no abuse
+    // vector. Banned users may keep editing preferences.
+    const user = await requireUser(req, { allowBanned: true });
     const snap = await settingsRef(user.uid).get();
     return asJson(200, { ...DEFAULTS, ...(snap.data() ?? {}) });
   } catch (err) {
@@ -39,7 +41,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — settings (language, theme, notifications) have no abuse
+    // vector. Banned users may keep editing preferences.
+    const user = await requireUser(req, { allowBanned: true });
     const body = (await req.json()) as Partial<SettingsBody>;
     const update: Record<string, unknown> = { updatedAt: new Date().toISOString() };
 

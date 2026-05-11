@@ -20,7 +20,11 @@ const STREAM_ID_RE = /^[A-Za-z0-9_-]{4,64}$/;
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser(req);
+    // PR-H — a banned user must be able to clean up their own running
+    // stream so the LiveKit room frees up. Refusing the end call would
+    // leave a stale `live` doc + paid-for room until the LiveKit
+    // `room_finished` webhook (or KHALID-004 watchdog) fires.
+    const user = await requireUser(req, { allowBanned: true });
     const body = (await req.json()) as Partial<EndBody>;
     if (!body.streamId) throw new HttpError(400, "streamId is required.");
     if (typeof body.streamId !== "string" || !STREAM_ID_RE.test(body.streamId)) {
