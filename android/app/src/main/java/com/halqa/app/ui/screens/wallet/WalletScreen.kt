@@ -2,6 +2,7 @@ package com.halqa.app.ui.screens.wallet
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +64,11 @@ fun WalletScreen(navController: NavController) {
         if (uid != null) WalletRepository.observe(uid) else flowOf(WalletSnapshot())
     ).collectAsStateWithLifecycle(initialValue = WalletSnapshot())
 
+    // Sara C1+C2 — withdraw sheet state hoisted here so the dialog
+    // survives the LazyColumn's item recompositions and a navigation
+    // back-stack pop doesn't leave a half-open sheet behind.
+    var showWithdrawSheet by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().background(HalqaColors.Bg)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp, start = 8.dp, end = 16.dp),
@@ -76,6 +85,7 @@ fun WalletScreen(navController: NavController) {
                 BalanceCard(
                     wallet = wallet,
                     onTopUp = { navController.navigate(Routes.TopUp) },
+                    onWithdraw = { showWithdrawSheet = true },
                 )
             }
             item { Spacer(Modifier.height(20.dp)) }
@@ -97,10 +107,25 @@ fun WalletScreen(navController: NavController) {
             }
         }
     }
+
+    if (showWithdrawSheet) {
+        WithdrawSheet(
+            currentDiamonds = wallet.diamonds,
+            onDismiss = { showWithdrawSheet = false },
+            onStartKyc = {
+                showWithdrawSheet = false
+                navController.navigate(Routes.Kyc)
+            },
+        )
+    }
 }
 
 @Composable
-private fun BalanceCard(wallet: WalletSnapshot, onTopUp: () -> Unit) {
+private fun BalanceCard(
+    wallet: WalletSnapshot,
+    onTopUp: () -> Unit,
+    onWithdraw: () -> Unit,
+) {
     val coinsLabel = formatCount(wallet.coins)
     val diamondsLabel = formatCount(wallet.diamonds)
     // Diamonds → SAR conversion is finalised by Yasser's economy spec
@@ -144,6 +169,7 @@ private fun BalanceCard(wallet: WalletSnapshot, onTopUp: () -> Unit) {
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(alpha = 0.18f))
+                        .clickable(onClick = onWithdraw)
                         .padding(vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {

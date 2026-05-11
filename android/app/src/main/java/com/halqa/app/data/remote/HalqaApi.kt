@@ -61,6 +61,25 @@ interface HalqaApi {
     suspend fun topupWallet(): TopupResponse
 
     /**
+     * Withdraw earnings (diamonds → fiat). The closed-beta build returns
+     * 503 to every caller; the route exists today exclusively so Layla's
+     * GR4 KYC-bypass re-verification hard-block is wired up before the
+     * real cashout path ships in v0.2.
+     *
+     * Failure modes the Android UI MUST distinguish:
+     *   - HTTP 403 `KYC_BYPASS_REVERIFY_REQUIRED` — user was grandfathered
+     *     past KYC under `BYPASS_KYC_FOR_BETA` and has not been manually
+     *     re-verified. The Android sheet maps this to a Warning banner
+     *     with an "ابدأ التحقق" CTA into [com.halqa.app.ui.navigation.Routes.Kyc].
+     *   - HTTP 503 `WITHDRAW_NOT_AVAILABLE` — feature is not yet live.
+     *     Surfaced as an informational banner, not as a permission denial.
+     *   - HTTP 401 — handled by [AuthAuthenticator] (force-refresh retry).
+     *   - 4xx/5xx anything else — falls through to `Throwable.humanize()`.
+     */
+    @POST("wallet/withdraw")
+    suspend fun withdrawWallet(@Body body: WithdrawRequest): WithdrawResponse
+
+    /**
      * Layla's T&S guardrail GR5. Fired exactly once per first-time
      * sign-in (Phone OTP and Google paths) immediately after
      * [com.halqa.app.data.UserDocBootstrap] reports
@@ -244,6 +263,32 @@ data class SignupHeartbeatResponse(
      * with HTTP 423 until staff manually unlock or the day rolls.
      */
     val locked: Boolean = false,
+)
+
+@Serializable
+data class WithdrawRequest(
+    /** Amount in diamonds the user wishes to withdraw. */
+    val amountDiamonds: Long = 0L,
+    /**
+     * Destination IBAN (SA-format expected, 24 chars). Validated client-side
+     * (length + alphanumeric) before submission so a typo doesn't burn the
+     * single-attempt 503/403 round-trip and so the server doesn't waste
+     * Firestore quota on obviously-malformed payloads.
+     */
+    val iban: String = "",
+)
+
+@Serializable
+data class WithdrawResponse(
+    val ok: Boolean = false,
+    /**
+     * Echo of the diamonds-deducted amount when the cashout actually
+     * committed. Always 0 in the current 503 stub. Populated when the
+     * real payout pipeline lands in v0.2.
+     */
+    val amountDiamonds: Long = 0L,
+    /** New wallet snapshot after the cashout. Null in the 503 stub. */
+    val balance: WalletBalanceDto? = null,
 )
 
 @Serializable
