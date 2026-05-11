@@ -60,6 +60,61 @@ export async function POST(req: NextRequest) {
     // join/leave events when adjusting the viewer count.
     const publisherUid = extractPublisherUid(roomName);
 
+    // Stream-liveness signal for the watchdog sweep
+    // (api/cron/streams/sweep). The sweep treats any /streams/{id} doc
+    // whose `lastWebhookAt` is older than 60 min as a candidate for
+    // force-end. Earlier revisions of this handler only stamped
+    // `lastWebhookAt` on a handful of event types
+    // (`room_started`, `room_finished`, `participant_joined`,
+    // `participant_left`) — and the participant branches further gated
+    // the stamp behind `status === "live"`. That left a real
+    // regression: a solo publisher streaming to an empty room emits
+    // `room_started` once, then publishes camera/mic tracks
+    // (`track_published`), then nothing else for the duration of the
+    // broadcast. LiveKit does NOT fire periodic "heartbeat" webhooks,
+    // and with zero viewers there are no `participant_joined`/`_left`
+    // events to stamp the doc. After 15 minutes of solo broadcasting
+    // the watchdog saw a stale `lastWebhookAt` (from `room_started`)
+    // and force-ended a perfectly healthy live stream from under the
+    // publisher. The handler docstring at line 24 even claimed the
+    // webhook stream "continuously stamps this on every join/leave",
+    // which was aspirational rather than actual.
+    //
+    // Fix is two-layered (this stamp + a wider sweep threshold in
+    // `cron/streams/sweep`):
+    //   1. Stamp on every webhook arrival, regardless of event type.
+    //      `track_published`, `track_unpublished`, `egress_*`,
+    //      `ingress_*` — all of them are evidence the LiveKit room is
+    //      still alive and worth keeping. The publisher's own
+    //      `participant_joined`/`_left` is the strongest liveness
+    //      signal we have for solo broadcasts; we want it stamped even
+    //      though the viewer-count branch skips it. Doing the stamp
+    //      up here (before the switch) means every branch inherits it
+    //      with no per-case bookkeeping.
+    //   2. Use `set({merge:true})` not `update({...})` so a webhook
+    //      that lands before the `livekit/token` create (cold-start
+    //      race) doesn't NOT_FOUND-crash the handler — we'd rather
+    //      preserve the existing tryWebhookUpdate-style fallback than
+    //      surface a 5xx that LiveKit will retry. The doc, if absent,
+    //      stays absent because the merge target only contains
+    //      `lastWebhookAt`; we never partially construct a stream doc
+    //      from webhook fields alone. Specifically the lazy create
+    //      below is INTENTIONAL only insofar as it stamps the field;
+    //      the Android client + `livekit/token` together write the
+    //      ownerUid/title/etc. and the existing rule on `/streams/{id}`
+    //      tolerates the resulting merge.
+    //
+    // Branches that re-stamp `lastWebhookAt` themselves (e.g.
+    // `room_started`, `room_finished`, the gated participant joins)
+    // are now redundant with this top-level stamp but kept intact so
+    // the per-branch transactions remain self-contained for review.
+    // The `lastWebhookAt` value they write is computed at slightly
+    // different times within the same handler invocation; either is
+    // correct from the watchdog's perspective.
+    await tryWebhookUpdate(ref, {
+      lastWebhookAt: new Date().toISOString(),
+    });
+
     switch (event.event) {
       case "room_started": {
         // Track the event timestamp for observability. Do NOT touch
