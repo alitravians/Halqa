@@ -1,0 +1,119 @@
+name: stream-watchdog
+
+# Replaces the Vercel `crons` block that was removed in PR #114 because
+# Vercel Hobby caps cron jobs at one run per day. Also replaces the
+# Firebase Scheduled Cloud Function attempt in PR-N (#115) which
+# required Blaze plan to deploy.
+#
+# This workflow runs every 5 minutes and hits the watchdog endpoint at
+# `POST /api/cron/streams/sweep` on the Vercel backend with a Bearer
+# `CRON_SECRET`. The endpoint already fail-closes if `CRON_SECRET` is
+# missing or mismatched (see backend/src/app/api/cron/streams/sweep/route.ts).
+#
+# Scheduled GitHub Actions jobs can be delayed by 5–15 minutes during
+# peak load on GitHub's runner pool — this is acceptable for the
+# watchdog because the idle-threshold is 60 minutes (60-min staleness
+# before a stream is force-ended), so a 5–15 minute delay does not
+# cause premature OR delayed reaping in any meaningful way.
+#
+# REQUIRED GITHUB ACTIONS REPO SECRETS
+# ------------------------------------
+# Set these at: GitHub → Settings → Secrets and variables → Actions → New secret.
+#
+#   CRON_SECRET       — the same value set in the Vercel project's
+#                       Production env. Generate with `openssl rand -hex 32`
+#                       if not already chosen. The Vercel route hard-
+#                       fails with 503 if missing.
+#
+#   VERCEL_BASE_URL   — the production Vercel URL of the backend,
+#                       e.g. `https://halqa-backend.vercel.app`. Do NOT
+#                       include a trailing slash.
+#
+# Both must be set before the first scheduled run lands. Until they are,
+# every run will fail visibly in the Actions tab and not silently — so
+# missing secrets are loud, not silent.
+#
+# COST
+# ----
+# Private-repo GitHub Actions billing: each scheduled run is ~5–10 sec
+# of runner time. 12 runs/hour × 720 hours/month × ~10 sec = ~24 min/
+# month — well within the free 2,000 minutes/month quota for private
+# repos on the GitHub Free plan.
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub Actions cron uses UTC and is best-effort.
+    - cron: "*/5 * * * *"
+  # Allow manual runs from the Actions tab for ad-hoc sweeps during
+  # incident response.
+  workflow_dispatch: {}
+
+# Block concurrent runs so a delayed run doesn't pile up if a previous
+# run is still in flight or the Vercel endpoint is slow.
+concurrency:
+  group: stream-watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Stream watchdog sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate required secrets
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_BASE_URL: ${{ secrets.VERCEL_BASE_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set. Add it at Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -z "$VERCEL_BASE_URL" ]; then
+            echo "::error::VERCEL_BASE_URL repo secret is not set. Add it at Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          case "$VERCEL_BASE_URL" in
+            http://*|https://*) : ;;
+            *)
+              echo "::error::VERCEL_BASE_URL must include the scheme (https://...). Got: $VERCEL_BASE_URL"
+              exit 1
+              ;;
+          esac
+
+      - name: Invoke watchdog sweep
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_BASE_URL: ${{ secrets.VERCEL_BASE_URL }}
+        run: |
+          set -euo pipefail
+          url="${VERCEL_BASE_URL%/}/api/cron/streams/sweep"
+          echo "POST $url"
+          response_file="$(mktemp)"
+          http_status="$(curl \
+            --silent \
+            --show-error \
+            --max-time 60 \
+            --retry 2 \
+            --retry-delay 5 \
+            --retry-connrefused \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            --header "Content-Type: application/json" \
+            --header "User-Agent: halqa-gha-stream-watchdog/1.0" \
+            --data '{}' \
+            "$url")"
+          echo "HTTP $http_status"
+          echo "--- response body ---"
+          cat "$response_file"
+          echo
+          echo "--- end response ---"
+          if [ "$http_status" != "200" ]; then
+            echo "::error::Watchdog endpoint returned non-200 status: $http_status"
+            exit 1
+          fi
